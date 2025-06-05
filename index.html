@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>OSM para Poly com Clique</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    input, button { margin-top: 10px; }
+    canvas { border: 1px solid black; margin-top: 20px; cursor: crosshair; }
+  </style>
+</head>
+<body>
+
+<h1>Conversor OSM para Poly com Seleção de Nós</h1>
+
+<input type="file" id="fileInput">
+<button onclick="convertOSM()">Converter</button>
+<pre id="output"></pre>
+
+<h2>Menor caminho calculado automaticamente após selecionar 2 nós</h2>
+<pre id="result"></pre>
+
+<canvas id="graphCanvas" width="600" height="600"></canvas>
+
+<script src="djikstragrafo.js"></script>
+
+</body>
+</html>
