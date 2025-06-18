@@ -206,7 +206,7 @@ function desenharGrafo(path = []) {
     ctx.stroke();
   }
 
-  ctx.fillStyle = 'green';
+  ctx.fillStyle = 'blue';
   selectedNodes.forEach(idx => {
     const p = scale(nodes[idx]);
     ctx.beginPath();
