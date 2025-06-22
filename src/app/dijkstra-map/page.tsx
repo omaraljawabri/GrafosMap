@@ -178,6 +178,10 @@ const DijkstraMapPage: NextPage = () => {
   const animationFrameIdRef = useRef<number | null>(null);
   const { toast } = useToast();
 
+  const [viewTransform, setViewTransform] = useState({ scale: 1, offsetX: 0, offsetY: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+
   const distancia = useCallback((a: ScriptNode, b: ScriptNode): number => {
     return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
   }, []);
@@ -426,6 +430,81 @@ const handleFileUploadAndParse = useCallback(async () => {
   reader.readAsText(polyFile);
 }, [polyFile, toast, buildGraphInternal]);
 
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.style.cursor = 'grab';
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const zoomFactor = 1.1;
+      setViewTransform(prev => {
+        const newScale = e.deltaY > 0 ? prev.scale / zoomFactor : prev.scale * zoomFactor;
+        const mouseX = e.offsetX;
+        const mouseY = e.offsetY;
+        const newOffsetX = mouseX - (mouseX - prev.offsetX) * (newScale / prev.scale);
+        const newOffsetY = mouseY - (mouseY - prev.offsetY) * (newScale / prev.scale);
+        return { scale: newScale, offsetX: newOffsetX, offsetY: newOffsetY };
+      });
+    };
+
+    const handleDoubleClick = (e: MouseEvent) => {
+      e.preventDefault();
+      const zoomFactor = 1.8;
+      setViewTransform(prev => {
+        const newScale = prev.scale * zoomFactor;
+        const mouseX = e.offsetX;
+        const mouseY = e.offsetY;
+        const newOffsetX = mouseX - (mouseX - prev.offsetX) * (newScale / prev.scale);
+        const newOffsetY = mouseY - (mouseY - prev.offsetY) * (newScale / prev.scale);
+        return { scale: newScale, offsetX: newOffsetX, offsetY: newOffsetY };
+      });
+    };
+
+    const handleMouseDown = (e: MouseEvent) => {
+      canvas.style.cursor = 'grabbing';
+      setIsPanning(true);
+      setPanStart({ x: e.clientX, y: e.clientY });
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isPanning) return;
+      const dx = e.clientX - panStart.x;
+      const dy = e.clientY - panStart.y;
+      setViewTransform(prev => ({ ...prev, offsetX: prev.offsetX + dx, offsetY: prev.offsetY + dy }));
+      setPanStart({ x: e.clientX, y: e.clientY });
+    };
+
+    const handleMouseUp = () => {
+      canvas.style.cursor = 'grab';
+      setIsPanning(false);
+    };
+
+    const handleMouseLeave = () => {
+      canvas.style.cursor = 'default';
+      setIsPanning(false);
+    };
+
+    canvas.addEventListener('wheel', handleWheel);
+    canvas.addEventListener('dblclick', handleDoubleClick);
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mouseleave', handleMouseLeave);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      canvas.removeEventListener('wheel', handleWheel);
+      canvas.removeEventListener('dblclick', handleDoubleClick);
+      canvas.removeEventListener('mousedown', handleMouseDown);
+      canvas.removeEventListener('mouseleave', handleMouseLeave);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isPanning, panStart, setViewTransform, setIsPanning, setPanStart]);
+
+  const resetView = () => {
+    setViewTransform({ scale: 1, offsetX: 0, offsetY: 0 });
+  };
 
   const dijkstraInternal = useCallback((startNodeIndex: number, endNodeIndex: number, currentNodes: ScriptNode[], currentAdj: AdjacencyList): DijkstraResult => {
   if (currentNodes.length === 0 || currentAdj.length === 0 || startNodeIndex >= currentNodes.length || endNodeIndex >= currentNodes.length) {
@@ -565,9 +644,11 @@ const handleFileUploadAndParse = useCallback(async () => {
     }
     const ctx = canvas.getContext('2d'); if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = 'gray';
-    ctx.lineWidth = 1;
-    ctx.lineWidth = 1;
+    
+    ctx.save();
+    ctx.translate(viewTransform.offsetX, viewTransform.offsetY);
+    ctx.scale(viewTransform.scale, viewTransform.scale);
+
     ways.forEach(way => {
       for (let i = 0; i < way.nodes.length - 1; i++) {
         const fromIdx = way.nodes[i];
@@ -604,7 +685,6 @@ const handleFileUploadAndParse = useCallback(async () => {
         }
       }
     });
-
 
     if (pathResult?.path.length) {
       ctx.strokeStyle = 'red'; 
@@ -667,7 +747,8 @@ const handleFileUploadAndParse = useCallback(async () => {
       });
     }
 
-  }, [scriptNodes, ways, pathResult, selectedNodeIndices, scalingParams, scaleCanvasPoint, dashOffset, appNodes, showColoredVertices, mostrarPesosArestas, mostrarIds]);
+    ctx.restore();
+  }, [scriptNodes, ways, pathResult, selectedNodeIndices, scalingParams, scaleCanvasPoint, dashOffset, appNodes, showColoredVertices, mostrarPesosArestas, mostrarIds, viewTransform]);
 
   useEffect(() => {
     if (pathResult?.path.length) {
@@ -1174,6 +1255,9 @@ useEffect(() => {
     </Button>
     <Button onClick={handleCopyImage} variant="outline" size="sm">
       <CopyIcon className="mr-2 h-4 w-4" /> Copiar Imagem
+    </Button>
+    <Button variant="outline" size="sm" onClick={resetView}>
+      Resetar Visualização
     </Button>
   </div>
 )}
