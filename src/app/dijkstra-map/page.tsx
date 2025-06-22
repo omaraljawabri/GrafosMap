@@ -34,6 +34,7 @@ type AdjacencyList = AdjNode[][];
 
 interface DijkstraAlgorithmResult {
   distance: number;
+  distanceInMeters?: number;
   path: number[];
 }
 
@@ -204,71 +205,125 @@ const DijkstraMapPage: NextPage = () => {
   }, [distancia]);
 
   const handleFileUploadAndParse = useCallback(async () => {
-    if (!osmFile) {
-      setTimeout(() => toast({ title: "Nenhum Arquivo", description: "Por favor, selecione um arquivo .osm primeiro.", variant: "destructive" }), 0);
-      return;
-    }
-    setIsLoading(true);
-    setPathResultText(null); setPathResult(null); setSelectedNodeIndices([]);
-    setAppNodes([]); setScriptNodes([]); setWays([]); setAdj([]); setMapStats(null); setScalingParams(null);
+  if (!osmFile) {
+    setTimeout(() => toast({
+      title: "Nenhum Arquivo",
+      description: "Por favor, selecione um arquivo .osm primeiro.",
+      variant: "destructive"
+    }), 0);
+    return;
+  }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(event.target?.result as string, "application/xml");
-        if (xmlDoc.querySelector('parsererror')) {
-          setTimeout(() => toast({ title: "Erro de Parsing", description: "Não foi possível parsear o arquivo OSM.", variant: "destructive" }), 0);
-          setIsLoading(false); return;
-        }
+  setIsLoading(true);
+  setPathResultText(null); setPathResult(null); setSelectedNodeIndices([]);
+  setAppNodes([]); setScriptNodes([]); setWays([]); setAdj([]); setMapStats(null); setScalingParams(null);
 
-        const nodeElements = Array.from(xmlDoc.getElementsByTagName('node'));
-        const wayElements = Array.from(xmlDoc.getElementsByTagName('way'));
-        
-        const newParsedAppNodes: AppNode[] = [];
-        const newParsedScriptNodes: ScriptNode[] = [];
-        const idToIndex: { [id: string]: number } = {};
-        let numID = 0;
-        
-        nodeElements.forEach(nodeEl => {
-          const id = nodeEl.getAttribute('id');
-          const lat = parseFloat(nodeEl.getAttribute('lat') || '0');
-          const lon = parseFloat(nodeEl.getAttribute('lon') || '0');
-          if (id) {
-            idToIndex[id] = numID++;
-            newParsedAppNodes.push({ id, x: lon, y: lat, originalLat: lat, originalLon: lon });
-            newParsedScriptNodes.push({ id, x: lon, y: lat });
-          }
-        });
-        
-        const newParsedWays: Way[] = [];
-        wayElements.forEach(wayEl => {
-          const nds = Array.from(wayEl.getElementsByTagName('nd'));
-          const ndRefs: number[] = nds.map(nd => idToIndex[nd.getAttribute('ref')!]).filter(ref => ref !== undefined);
-          const oneway = Array.from(wayEl.getElementsByTagName('tag')).some(tag => tag.getAttribute('k') === 'oneway' && tag.getAttribute('v') === 'yes');
-          if (ndRefs.length > 1) newParsedWays.push({ nodes: ndRefs, oneway });
-        });
-        
-        setAppNodes(newParsedAppNodes);
-        setScriptNodes(newParsedScriptNodes);
-        setWays(newParsedWays);
-        buildGraphInternal(newParsedScriptNodes, newParsedWays);
-        setMapStats(`Arquivo convertido e grafo criado.\nNós: ${newParsedScriptNodes.length}\nVias: ${newParsedWays.length}`);
-        setTimeout(() => toast({ title: "Arquivo .osm processado", description: "Grafo gerado com sucesso a partir do arquivo OSM." }), 0);
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      } catch (error) {
-        setTimeout(() => toast({ title: "Erro de Processamento", description: "Ocorreu um erro ao processar o arquivo OSM. Tente novamente.", variant: "destructive" }), 0);
-        setAppNodes([]); setScriptNodes([]); setWays([]); setAdj([]); setSelectedNodeIndices([]); setMapStats(null);
-      } finally {
-        setIsLoading(false);
+  const geoToMeters = (lat: number, lon: number): { x: number; y: number } => {
+    const R = 6378137; // Raio da Terra (WGS84)
+    const x = R * lon * Math.PI / 180;
+    const y = R * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360));
+    return { x, y };
+  };
+
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    try {
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(event.target?.result as string, "application/xml");
+      if (xmlDoc.querySelector('parsererror')) {
+        setTimeout(() => toast({
+          title: "Erro de Parsing",
+          description: "Não foi possível parsear o arquivo OSM.",
+          variant: "destructive"
+        }), 0);
+        setIsLoading(false); return;
       }
-    };
-    reader.onerror = () => {
-      setTimeout(() => toast({ title: "Erro de Leitura de Arquivo", description: "Selecione um arquivo .osm válido.", variant: "destructive" }), 0);
+
+      const nodeElements = Array.from(xmlDoc.getElementsByTagName('node'));
+      const wayElements = Array.from(xmlDoc.getElementsByTagName('way'));
+
+      const newParsedAppNodes: AppNode[] = [];
+      const newParsedScriptNodes: ScriptNode[] = [];
+      const idToIndex: { [id: string]: number } = {};
+      let numID = 0;
+
+      const originalCoords: { x: number; y: number }[] = [];
+
+      nodeElements.forEach(nodeEl => {
+        const id = nodeEl.getAttribute('id');
+        const lat = parseFloat(nodeEl.getAttribute('lat') || '0');
+        const lon = parseFloat(nodeEl.getAttribute('lon') || '0');
+        if (id) {
+          const { x, y } = geoToMeters(lat, lon);
+          originalCoords.push({ x, y });
+          idToIndex[id] = numID++;
+          newParsedAppNodes.push({ id, x: 0, y: 0, originalLat: lat, originalLon: lon });
+          newParsedScriptNodes.push({ id, x: 0, y: 0 });
+        }
+      });
+
+      // Escala e inversão vertical
+      const xs = originalCoords.map(c => c.x);
+      const ys = originalCoords.map(c => c.y);
+      const minX = Math.min(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const escala = 2; // 1 pixel = 2 metros (mesma do .poly)
+
+      for (let i = 0; i < originalCoords.length; i++) {
+        const scaledX = (xs[i] - minX) / escala;
+        const scaledY = (maxY - ys[i]) / escala; // inverte o eixo Y
+
+        newParsedAppNodes[i].x = scaledX;
+        newParsedAppNodes[i].y = scaledY;
+        newParsedScriptNodes[i].x = scaledX;
+        newParsedScriptNodes[i].y = scaledY;
+      }
+
+      const newParsedWays: Way[] = [];
+      wayElements.forEach(wayEl => {
+        const nds = Array.from(wayEl.getElementsByTagName('nd'));
+        const ndRefs: number[] = nds.map(nd => idToIndex[nd.getAttribute('ref')!]).filter(ref => ref !== undefined);
+        if (ndRefs.length > 1) {
+          newParsedWays.push({ nodes: ndRefs, oneway: false }); // Ignora sentido, cria sempre as arestas
+        }
+      });
+
+      setAppNodes(newParsedAppNodes);
+      setScriptNodes(newParsedScriptNodes);
+      setWays(newParsedWays);
+      buildGraphInternal(newParsedScriptNodes, newParsedWays);
+      const totalEdges = newParsedWays.reduce((sum, way) => sum + (way.nodes.length - 1), 0);
+setMapStats(`Arquivo .osm convertido e grafo criado.\nNós: ${newParsedScriptNodes.length}\nArestas: ${totalEdges}`);
+      setTimeout(() => toast({
+        title: "Arquivo .osm processado",
+        description: "Grafo gerado com sucesso a partir do arquivo OSM."
+      }), 0);
+    } catch (error) {
+      setTimeout(() => toast({
+        title: "Erro de Processamento",
+        description: "Ocorreu um erro ao processar o arquivo OSM. Tente novamente.",
+        variant: "destructive"
+      }), 0);
+      setAppNodes([]); setScriptNodes([]); setWays([]); setAdj([]); setSelectedNodeIndices([]); setMapStats(null);
+    } finally {
       setIsLoading(false);
-    };
-    reader.readAsText(osmFile);
-  }, [osmFile, toast, buildGraphInternal]);
+    }
+  };
+
+  reader.onerror = () => {
+    setTimeout(() => toast({
+      title: "Erro de Leitura de Arquivo",
+      description: "Selecione um arquivo .osm válido.",
+      variant: "destructive"
+    }), 0);
+    setIsLoading(false);
+  };
+
+  reader.readAsText(osmFile);
+}, [osmFile, toast, buildGraphInternal]);
+
+
 
   const handlePolyFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -335,7 +390,7 @@ const DijkstraMapPage: NextPage = () => {
       setScriptNodes(script);
       setWays(newParsedWays);
       buildGraphInternal(script, newParsedWays);
-      setMapStats(`Arquivo .poly convertido com sucesso.\nNós: ${script.length}\nArestas: ${newParsedWays.length}`);
+      setMapStats(`Arquivo .poly convertido e grafo criado.\nNós: ${script.length}\nArestas: ${newParsedWays.length}`);
       toast({ title: "Arquivo .poly processado", description: "Grafo gerado com sucesso a partir do arquivo POLY." });
     } catch (e) {
       console.error(e);
@@ -352,83 +407,89 @@ const DijkstraMapPage: NextPage = () => {
 
 
   const dijkstraInternal = useCallback((startNodeIndex: number, endNodeIndex: number, currentNodes: ScriptNode[], currentAdj: AdjacencyList): DijkstraResult => {
-    if (currentNodes.length === 0 || currentAdj.length === 0 || startNodeIndex >= currentNodes.length || endNodeIndex >= currentNodes.length) {
-      return {
-        success: false,
-        error: {
-          type: 'INVALID_NODES',
-          message: 'Nós inválidos ou grafo vazio',
-          details: 'Verifique se o grafo foi carregado corretamente e se os nós selecionados são válidos.'
-        }
-      };
-    }
-
-    const startTime = performance.now();
-    const dist = Array(currentNodes.length).fill(Infinity);
-    const prev = Array(currentNodes.length).fill(null);
-    const visited = Array(currentNodes.length).fill(false);
-    let visitedNodesCount = 0;
-
-    dist[startNodeIndex] = 0;
-    const pq = new MinHeap();
-    pq.insert(startNodeIndex, 0);
-
-    while (!pq.isEmpty()) {
-      const current = pq.extractMin();
-      if (!current) break;
-      const u = current.node;
-
-      if (visited[u]) continue;
-      visited[u] = true;
-      visitedNodesCount++;
-
-      if (u === endNodeIndex) break;
-
-      for (const neighbor of currentAdj[u]) {
-        const alt = dist[u] + neighbor.weight;
-        if (alt < dist[neighbor.node]) {
-          dist[neighbor.node] = alt;
-          prev[neighbor.node] = u;
-          pq.insert(neighbor.node, alt);
-        }
-      }
-    }
-
-    const processingTimeMs = performance.now() - startTime;
-    
-    if (dist[endNodeIndex] === Infinity) {
-      const hasOneWayIssue = graphType.hasOneWayStreets && 
-        (currentAdj[startNodeIndex].length === 0 || 
-         !currentAdj.some(neighbors => neighbors.some(n => n.node === endNodeIndex)));
-      
-      return {
-        success: false,
-        error: {
-          type: hasOneWayIssue ? 'ONE_WAY_BLOCKED' : 'NO_PATH',
-          message: hasOneWayIssue ? 
-            'Caminho bloqueado por vias com mão única' : 
-            'Não existe caminho entre os nós selecionados',
-          details: hasOneWayIssue ?
-            'O caminho não pode ser encontrado devido a direção nas vias. Tente selecionar nós diferentes.' :
-            'Os nós selecionados não estão conectados no grafo.'
-        }
-      };
-    }
-
-    const path: number[] = [];
-    for (let at: number | null = endNodeIndex; at !== null; at = prev[at]) path.push(at);
-    path.reverse();
-
+  if (currentNodes.length === 0 || currentAdj.length === 0 || startNodeIndex >= currentNodes.length || endNodeIndex >= currentNodes.length) {
     return {
-      success: true,
-      result: { 
-        distance: dist[endNodeIndex], 
-        path, 
-        visitedNodesCount, 
-        processingTimeMs 
+      success: false,
+      error: {
+        type: 'INVALID_NODES',
+        message: 'Nós inválidos ou grafo vazio',
+        details: 'Verifique se o grafo foi carregado corretamente e se os nós selecionados são válidos.'
       }
     };
-  }, [graphType.hasOneWayStreets]);
+  }
+
+  const startTime = performance.now();
+  const dist = Array(currentNodes.length).fill(Infinity);
+  const prev = Array(currentNodes.length).fill(null);
+  const visited = Array(currentNodes.length).fill(false);
+  let visitedNodesCount = 0;
+
+  dist[startNodeIndex] = 0;
+  const pq = new MinHeap();
+  pq.insert(startNodeIndex, 0);
+
+  while (!pq.isEmpty()) {
+    const current = pq.extractMin();
+    if (!current) break;
+    const u = current.node;
+
+    if (visited[u]) continue;
+    visited[u] = true;
+    visitedNodesCount++;
+
+    if (u === endNodeIndex) break;
+
+    for (const neighbor of currentAdj[u]) {
+      const alt = dist[u] + neighbor.weight;
+      if (alt < dist[neighbor.node]) {
+        dist[neighbor.node] = alt;
+        prev[neighbor.node] = u;
+        pq.insert(neighbor.node, alt);
+      }
+    }
+  }
+
+  const processingTimeMs = performance.now() - startTime;
+
+  if (dist[endNodeIndex] === Infinity) {
+    const hasOneWayIssue = graphType.hasOneWayStreets && 
+      (currentAdj[startNodeIndex].length === 0 || 
+        !currentAdj.some(neighbors => neighbors.some(n => n.node === endNodeIndex)));
+
+    return {
+      success: false,
+      error: {
+        type: hasOneWayIssue ? 'ONE_WAY_BLOCKED' : 'NO_PATH',
+        message: hasOneWayIssue ? 
+          'Caminho bloqueado por vias com mão única' : 
+          'Não existe caminho entre os nós selecionados',
+        details: hasOneWayIssue ?
+          'O caminho não pode ser encontrado devido a direção nas vias. Tente selecionar nós diferentes.' :
+          'Os nós selecionados não estão conectados no grafo.'
+      }
+    };
+  }
+
+  const path: number[] = [];
+  for (let at: number | null = endNodeIndex; at !== null; at = prev[at]) path.push(at);
+  path.reverse();
+
+  const distanceInPixels = dist[endNodeIndex];
+  const escalaEmMetros = 2; // ajuste conforme necessário
+  const distanceInMeters = distanceInPixels * escalaEmMetros;
+
+  return {
+    success: true,
+    result: { 
+      distance: distanceInPixels,
+      distanceInMeters, // <-- novo campo retornado
+      path,
+      visitedNodesCount,
+      processingTimeMs
+    }
+  };
+}, [graphType.hasOneWayStreets]);
+
 
 
   useEffect(() => {
@@ -624,20 +685,30 @@ const DijkstraMapPage: NextPage = () => {
           }), 0);
           
           setPathResultText(result.error?.message || 'Não existe caminho entre os nós selecionados.');
-        } else {
-          const pathNodeIds = result.result!.path.map(idx => scriptNodes[idx].id).join(' -> ');
-          const pathNodeCoords = result.result!.path.map(i => `Nó ${scriptNodes[i].id} (Lon: ${appNodes[i].originalLon.toFixed(5)}, Lat: ${appNodes[i].originalLat.toFixed(5)})`).join('\n');
-          const resultString = 
-            `Menor Caminho:\nOrigem: Nó ${scriptNodes[startNodeIdx].id} (Lat: ${appNodes[startNodeIdx].originalLat.toFixed(5)}, Lon: ${appNodes[startNodeIdx].originalLon.toFixed(5)})\n` +
-            `Destino: Nó ${scriptNodes[endNodeIdx].id} (Lat: ${appNodes[endNodeIdx].originalLat.toFixed(5)}, Lon: ${appNodes[endNodeIdx].originalLon.toFixed(5)})\n` +
-            `---------------------------------\nDistância: ${result.result!.distance.toFixed(3)}\nTempo de processamento: ${result.result!.processingTimeMs.toFixed(2)} ms\n` +
-            `Nós visitados: ${result.result!.visitedNodesCount}\n---------------------------------\nCaminho (IDs):\n${pathNodeIds}\n` +
-            `---------------------------------\nCoordenadas:\n${pathNodeCoords}`;
-          
-          setPathResultText(resultString); 
-          setPathResult(result.result || null);
-          setTimeout(() => toast({ title: "Caminho Encontrado!", description: `Distância: ${result.result!.distance.toFixed(3)}.` }), 0);
-        }
+            } else {
+              const pathNodeIds = result.result!.path.map(idx => scriptNodes[idx].id).join(' -> ');
+              const pathNodeCoords = result.result!.path.map(i => `Nó ${scriptNodes[i].id} (Lon: ${appNodes[i].originalLon.toFixed(5)}, Lat: ${appNodes[i].originalLat.toFixed(5)})`).join('\n');
+
+            // Cálculo adicional
+              const escalaEmMetros = 2; // ajuste se necessário
+              const distanceInMeters = result.result!.distance * escalaEmMetros;
+
+              const resultString = 
+              `Menor Caminho:\nOrigem: Nó ${scriptNodes[startNodeIdx].id} (Lat: ${appNodes[startNodeIdx].originalLat.toFixed(5)}, Lon: ${appNodes[startNodeIdx].originalLon.toFixed(5)})\n` +
+                `Destino: Nó ${scriptNodes[endNodeIdx].id} (Lat: ${appNodes[endNodeIdx].originalLat.toFixed(5)}, Lon: ${appNodes[endNodeIdx].originalLon.toFixed(5)})\n` +
+                `---------------------------------\nDistância: ${result.result!.distance.toFixed(3)} px (${distanceInMeters.toFixed(2)} m)\n` +
+    `Tempo de processamento: ${result.result!.processingTimeMs.toFixed(2)} ms\n` +
+    `Nós visitados: ${result.result!.visitedNodesCount}\n---------------------------------\nCaminho (IDs):\n${pathNodeIds}\n` +
+    `---------------------------------\nCoordenadas:\n${pathNodeCoords}`;
+
+  setPathResultText(resultString);
+  setPathResult(result.result || null);
+  setTimeout(() => toast({
+    title: "Caminho Encontrado!",
+    description: `Distância: ${result.result!.distance.toFixed(3)}.`,
+  }), 0);
+}
+
       }
     };
     canvas.addEventListener('click', handleClick);
