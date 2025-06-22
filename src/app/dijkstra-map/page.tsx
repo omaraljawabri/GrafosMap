@@ -164,6 +164,7 @@ const DijkstraMapPage: NextPage = () => {
   const [mostrarIds, setMostrarIds] = useState(false);
   const [modoRemoverArestas, setModoRemoverArestas] = useState(false);
   const [selectedVerticesToRemove, setSelectedVerticesToRemove] = useState<number[]>([]);
+  const [showColoredVertices, setShowColoredVertices] = useState(true);
   
   const [graphType, setGraphType] = useState<GraphType>({
     isDirected: false,
@@ -604,7 +605,19 @@ const handleFileUploadAndParse = useCallback(async () => {
       }
       ctx.shadowBlur = 0; ctx.setLineDash([]);
     }
-    
+
+    if (showColoredVertices) {
+  ctx.fillStyle = '#ff0000';
+   ctx.fillStyle = document.documentElement.classList.contains('dark') ? '#ffffff' : 'black'; // ou a cor que você quiser
+  scriptNodes.forEach((node, i) => {
+    if (!selectedNodeIndices.includes(i)) {
+      const p = scaleCanvasPoint(node);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  });
+}
     ctx.fillStyle = 'green'; 
     selectedNodeIndices.forEach(nodeIndex => {
       if (scriptNodes[nodeIndex]) {
@@ -619,7 +632,8 @@ const handleFileUploadAndParse = useCallback(async () => {
         }
       }
     });
-  }, [scriptNodes, ways, pathResult, selectedNodeIndices, scalingParams, scaleCanvasPoint, dashOffset, appNodes]);
+
+  }, [scriptNodes, ways, pathResult, selectedNodeIndices, scalingParams, scaleCanvasPoint, dashOffset, appNodes, showColoredVertices]);
 
   useEffect(() => {
     if (pathResult?.path.length) {
@@ -1116,10 +1130,19 @@ useEffect(() => {
               )}
             </div>
             {appNodes.length > 0 && (
-              <Button onClick={handleCopyImage} variant="outline" size="sm" className="ml-auto">
-                <CopyIcon className="mr-2 h-4 w-4" /> Copiar Imagem
-              </Button>
-            )}
+  <div className="flex items-center gap-4 ml-auto">
+    <Button 
+      variant="outline" 
+      size="sm" 
+      onClick={() => setShowColoredVertices(prev => !prev)}
+    >
+      {showColoredVertices ? "Ocultar Vértices" : "Mostrar Vértices"}
+    </Button>
+    <Button onClick={handleCopyImage} variant="outline" size="sm">
+      <CopyIcon className="mr-2 h-4 w-4" /> Copiar Imagem
+    </Button>
+  </div>
+)}
           </div>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center p-2 sm:p-4">
