@@ -503,7 +503,18 @@ const handleFileUploadAndParse = useCallback(async () => {
   }, [isPanning, panStart, setViewTransform, setIsPanning, setPanStart]);
 
   const resetView = () => {
-    setViewTransform({ scale: 1, offsetX: 0, offsetY: 0 });
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const initialZoom = 1.5;
+    const canvasCenterX = canvas.width / 2;
+    const canvasCenterY = canvas.height / 2;
+    const initialOffsetX = canvasCenterX - canvasCenterX * initialZoom;
+    const initialOffsetY = canvasCenterY - canvasCenterY * initialZoom;
+    setViewTransform({
+      scale: initialZoom,
+      offsetX: initialOffsetX,
+      offsetY: initialOffsetY,
+    });
   };
 
   const dijkstraInternal = useCallback((startNodeIndex: number, endNodeIndex: number, currentNodes: ScriptNode[], currentAdj: AdjacencyList): DijkstraResult => {
@@ -623,6 +634,7 @@ const handleFileUploadAndParse = useCallback(async () => {
         minX, maxX, minY, maxY, scale, offsetX, offsetY,
         canvasWidth, canvasHeight 
     });
+    resetView();
   }, [scriptNodes, osmFile]);
   
   const scaleCanvasPoint = useCallback((node: ScriptNode): { x: number, y: number } => {
@@ -765,31 +777,32 @@ const handleFileUploadAndParse = useCallback(async () => {
   }, [pathResult]);
 
   const getClosestNodeIndex = useCallback((canvasX: number, canvasY: number): number | null => {
-    if (!scalingParams || scriptNodes.length === 0 || !canvasRef.current) return null;
-    
-    const graphX = (canvasX - scalingParams.offsetX) / scalingParams.scale + scalingParams.minX;
-    const graphY = (canvasY - scalingParams.offsetY) / scalingParams.scale + scalingParams.minY;
+    if (!scalingParams || !canvasRef.current || scriptNodes.length === 0) return null;
 
-    let closestIndex = -1; 
+    let closestIndex = -1;
     let minSqDist = Infinity;
-    
-    for (let i = 0; i < scriptNodes.length; i++) {
-      const dx = graphX - scriptNodes[i].x; 
-      const dy = graphY - scriptNodes[i].y;
-      const sqDist = dx * dx + dy * dy;
-      if (sqDist < minSqDist) { 
-        minSqDist = sqDist; 
-        closestIndex = i;
-      }
-    }
-    
-    const threshold = 15;
-    const distanceInGraphUnits = Math.sqrt(minSqDist);
-    const distanceInPixels = distanceInGraphUnits * scalingParams.scale;
-    
-    return (closestIndex !== -1 && distanceInPixels < threshold * 1.5) ? closestIndex : null;
 
-  }, [scriptNodes, scalingParams]);
+    for (let i = 0; i < scriptNodes.length; i++) {
+        const node = scriptNodes[i];
+        const scaledPoint = scaleCanvasPoint(node);
+        const screenX = scaledPoint.x * viewTransform.scale + viewTransform.offsetX;
+        const screenY = scaledPoint.y * viewTransform.scale + viewTransform.offsetY;
+        const dx = canvasX - screenX;
+        const dy = canvasY - screenY;
+        const sqDist = dx * dx + dy * dy;
+
+        if (sqDist < minSqDist) {
+            minSqDist = sqDist;
+            closestIndex = i;
+        }
+    }
+
+    const threshold = 15;
+    if (closestIndex !== -1 && Math.sqrt(minSqDist) < threshold) {
+        return closestIndex;
+    }
+    return null;
+  }, [scriptNodes, scalingParams, viewTransform, scaleCanvasPoint]);
 
   useEffect(() => {
     if (modoRemoverArestas) return;
@@ -797,8 +810,11 @@ const handleFileUploadAndParse = useCallback(async () => {
     if (!canvas || scriptNodes.length === 0 || !scalingParams || isLoading) return;
 
     const handleClick = (event: MouseEvent) => {
+      if (!canvasRef.current) return;
+      const canvas = canvasRef.current;
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left; const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (event.clientY - rect.top) * (canvas.height / rect.height);
       const closestNodeIdx = getClosestNodeIndex(x, y);
 
       if (closestNodeIdx === null) return;
@@ -1246,6 +1262,12 @@ useEffect(() => {
             </div>
             {appNodes.length > 0 && (
   <div className="flex items-center gap-4 ml-auto">
+    <Button variant="outline" size="sm" onClick={() => setMostrarIds(prev => !prev)}>
+      {mostrarIds ? "Ocultar IDs" : "Enumerar Vértices"}
+    </Button>
+    <Button variant="outline" size="sm" onClick={() => setMostrarPesosArestas(prev => !prev)}>
+      {mostrarPesosArestas ? "Ocultar Pesos" : "Enumerar Arestas"}
+    </Button>
     <Button 
       variant="outline" 
       size="sm" 
