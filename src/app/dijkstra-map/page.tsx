@@ -212,6 +212,7 @@ const DijkstraMapPage: NextPage = () => {
     
   }, [distancia]);
 
+// Função que processa o arquivo .osm carregado, extraindo nós, vias e direção (oneway) para gerar o grafo com base em dados reais de mapa.
 const handleFileUploadAndParse = useCallback(async () => {
   if (!osmFile) {
     setTimeout(() => toast({
@@ -227,7 +228,7 @@ const handleFileUploadAndParse = useCallback(async () => {
   setAppNodes([]); setScriptNodes([]); setWays([]); setAdj([]); setMapStats(null); setScalingParams(null);
 
   const geoToMeters = (lat: number, lon: number): { x: number; y: number } => {
-    const R = 6378137; // Raio da Terra (WGS84)
+    const R = 6378137; // Raio da Terra
     const x = R * lon * Math.PI / 180;
     const y = R * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360));
     return { x, y };
@@ -270,7 +271,7 @@ const handleFileUploadAndParse = useCallback(async () => {
         }
       });
 
-      // Escala e inversão vertical
+      // Escala
       const xs = originalCoords.map(c => c.x);
       const ys = originalCoords.map(c => c.y);
       const minX = Math.min(...xs);
@@ -279,7 +280,7 @@ const handleFileUploadAndParse = useCallback(async () => {
 
       for (let i = 0; i < originalCoords.length; i++) {
         const scaledX = (xs[i] - minX) / escala;
-        const scaledY = (maxY - ys[i]) / escala; // inverte o eixo Y
+        const scaledY = (maxY - ys[i]) / escala;
 
         newParsedAppNodes[i].x = scaledX;
         newParsedAppNodes[i].y = scaledY;
@@ -297,7 +298,7 @@ const handleFileUploadAndParse = useCallback(async () => {
         );
 
         if (ndRefs.length > 1) {
-          newParsedWays.push({ nodes: ndRefs, oneway }); // ⬅️ mantém direção
+          newParsedWays.push({ nodes: ndRefs, oneway });
         }
       });
 
@@ -306,10 +307,9 @@ const handleFileUploadAndParse = useCallback(async () => {
       setWays(newParsedWays);
       buildGraphInternal(newParsedScriptNodes, newParsedWays);
 
-      // Contagem correta de arestas, levando em conta mão única
       const totalEdges = newParsedWays.reduce((sum, way) => {
-        const segments = way.nodes.length - 1;
-        return sum + (way.oneway ? segments : segments * 2);
+      const segments = way.nodes.length - 1;
+        return sum + segments;
       }, 0);
 
       setMapStats(`Arquivo .osm convertido e grafo criado.\nNós: ${newParsedScriptNodes.length}\nArestas: ${totalEdges}`);
@@ -342,8 +342,7 @@ const handleFileUploadAndParse = useCallback(async () => {
   reader.readAsText(osmFile);
 }, [osmFile, toast, buildGraphInternal]);
 
-
-
+  // Função que lida com a seleção de um arquivo .poly, limpando os dados atuais e preparando para o novo carregamento.
   const handlePolyFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file && file.name.endsWith('.poly')) {
@@ -358,6 +357,7 @@ const handleFileUploadAndParse = useCallback(async () => {
     }
   };
 
+  // Função que processa o arquivo .poly carregado, convertendo seus dados em nós e arestas para construir o grafo.
   const handlePolyUploadAndParse = useCallback(() => {
   if (!polyFile) {
     toast({ title: "Nenhum Arquivo", description: "Por favor, selecione um arquivo .poly.", variant: "destructive" });
@@ -372,7 +372,7 @@ const handleFileUploadAndParse = useCallback(async () => {
 
       if (lines.length < 2) throw new Error("Arquivo inválido");
 
-      // === PARTE 1: VÉRTICES ===
+      // Vértices
       const [nNodesStr] = lines[0].split(/\s+/);
       const nNodes = parseInt(nNodesStr);
       const nodeLines = lines.slice(1, 1 + nNodes);
@@ -388,11 +388,11 @@ const handleFileUploadAndParse = useCallback(async () => {
         };
       });
 
-      // === PARTE 2: ARESTAS ===
-      const edgesHeaderLine = lines[1 + nNodes]; // linha do tipo "109 0 1"
-      const nEdges = parseInt(edgesHeaderLine.split(/\s+/)[0]); // pode ser usado para validar
+      // Arestas
+      const edgesHeaderLine = lines[1 + nNodes];
+      const nEdges = parseInt(edgesHeaderLine.split(/\s+/)[0]);
 
-      const edgeLines = lines.slice(2 + nNodes, lines.length - 1); // ignora o último "0"
+      const edgeLines = lines.slice(2 + nNodes, lines.length - 1);
 
       const newParsedWays: Way[] = [];
 
@@ -494,22 +494,20 @@ const handleFileUploadAndParse = useCallback(async () => {
   path.reverse();
 
   const distanceInPixels = dist[endNodeIndex];
-  const escalaEmMetros = 2; // ajuste conforme necessário
+  const escalaEmMetros = 2; // ajustar conforme necessário
   const distanceInMeters = distanceInPixels * escalaEmMetros;
 
   return {
     success: true,
     result: { 
       distance: distanceInPixels,
-      distanceInMeters, // <-- novo campo retornado
+      distanceInMeters, 
       path,
       visitedNodesCount,
       processingTimeMs
     }
   };
 }, [graphType.hasOneWayStreets]);
-
-
 
   useEffect(() => {
     const canvas = canvasRef.current;
