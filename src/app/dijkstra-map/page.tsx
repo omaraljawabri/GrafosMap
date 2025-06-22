@@ -42,6 +42,24 @@ interface DijkstraDisplayResult extends DijkstraAlgorithmResult {
   processingTimeMs: number;
 }
 
+interface GraphType {
+  isDirected: boolean;
+  isWeighted: boolean;
+  hasOneWayStreets: boolean;
+}
+
+interface PathError {
+  type: 'NO_PATH' | 'ONE_WAY_BLOCKED' | 'DISCONNECTED_GRAPH' | 'INVALID_NODES';
+  message: string;
+  details?: string;
+}
+
+interface DijkstraResult {
+  success: boolean;
+  result?: DijkstraDisplayResult;
+  error?: PathError;
+}
+
 interface ScalingParams {
   minX: number;
   maxX: number;
@@ -138,6 +156,11 @@ const DijkstraMapPage: NextPage = () => {
   const [mapStats, setMapStats] = useState<string | null>(null);
   const [scalingParams, setScalingParams] = useState<ScalingParams | null>(null);
   const [dashOffset, setDashOffset] = useState(0);
+  const [graphType, setGraphType] = useState<GraphType>({
+    isDirected: false,
+    isWeighted: true,
+    hasOneWayStreets: false
+  });
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -150,6 +173,9 @@ const DijkstraMapPage: NextPage = () => {
 
   const buildGraphInternal = useCallback((currentNodes: ScriptNode[], currentWays: Way[]) => {
     const newAdj: AdjacencyList = Array.from({ length: currentNodes.length }, () => []);
+    let hasOneWayStreets = false;
+    let isDirected = false;
+    
     for (const way of currentWays) {
       const ndRefs = way.nodes;
       for (let i = 0; i < ndRefs.length - 1; i++) {
@@ -160,10 +186,21 @@ const DijkstraMapPage: NextPage = () => {
         newAdj[uIndex].push({ node: vIndex, weight });
         if (!way.oneway) {
           newAdj[vIndex].push({ node: uIndex, weight });
+        } else {
+          hasOneWayStreets = true;
+          isDirected = true;
         }
       }
     }
+    
+    setGraphType({
+      isDirected,
+      isWeighted: true,
+      hasOneWayStreets
+    });
+    
     setAdj(newAdj);
+    
   }, [distancia]);
 
   const handleFileUploadAndParse = useCallback(async () => {
@@ -314,8 +351,17 @@ const DijkstraMapPage: NextPage = () => {
 }, [polyFile, toast, buildGraphInternal]);
 
 
-  const dijkstraInternal = useCallback((startNodeIndex: number, endNodeIndex: number, currentNodes: ScriptNode[], currentAdj: AdjacencyList): DijkstraDisplayResult | null => {
-    if (currentNodes.length === 0 || currentAdj.length === 0 || startNodeIndex >= currentNodes.length || endNodeIndex >= currentNodes.length) return null;
+  const dijkstraInternal = useCallback((startNodeIndex: number, endNodeIndex: number, currentNodes: ScriptNode[], currentAdj: AdjacencyList): DijkstraResult => {
+    if (currentNodes.length === 0 || currentAdj.length === 0 || startNodeIndex >= currentNodes.length || endNodeIndex >= currentNodes.length) {
+      return {
+        success: false,
+        error: {
+          type: 'INVALID_NODES',
+          message: 'Nós inválidos ou grafo vazio',
+          details: 'Verifique se o grafo foi carregado corretamente e se os nós selecionados são válidos.'
+        }
+      };
+    }
 
     const startTime = performance.now();
     const dist = Array(currentNodes.length).fill(Infinity);
@@ -349,14 +395,40 @@ const DijkstraMapPage: NextPage = () => {
     }
 
     const processingTimeMs = performance.now() - startTime;
-    if (dist[endNodeIndex] === Infinity) return null;
+    
+    if (dist[endNodeIndex] === Infinity) {
+      const hasOneWayIssue = graphType.hasOneWayStreets && 
+        (currentAdj[startNodeIndex].length === 0 || 
+         !currentAdj.some(neighbors => neighbors.some(n => n.node === endNodeIndex)));
+      
+      return {
+        success: false,
+        error: {
+          type: hasOneWayIssue ? 'ONE_WAY_BLOCKED' : 'NO_PATH',
+          message: hasOneWayIssue ? 
+            'Caminho bloqueado por vias com mão única' : 
+            'Não existe caminho entre os nós selecionados',
+          details: hasOneWayIssue ?
+            'O caminho não pode ser encontrado devido a direção nas vias. Tente selecionar nós diferentes.' :
+            'Os nós selecionados não estão conectados no grafo.'
+        }
+      };
+    }
 
     const path: number[] = [];
     for (let at: number | null = endNodeIndex; at !== null; at = prev[at]) path.push(at);
     path.reverse();
 
-    return { distance: dist[endNodeIndex], path, visitedNodesCount, processingTimeMs };
-  }, []);
+    return {
+      success: true,
+      result: { 
+        distance: dist[endNodeIndex], 
+        path, 
+        visitedNodesCount, 
+        processingTimeMs 
+      }
+    };
+  }, [graphType.hasOneWayStreets]);
 
 
   useEffect(() => {
@@ -405,22 +477,21 @@ const DijkstraMapPage: NextPage = () => {
     }
     const ctx = canvas.getContext('2d'); if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    ctx.strokeStyle = 'gray'; 
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'gray';
+          ctx.lineWidth = 1;
     ways.forEach(way => {
       for (let i = 0; i < way.nodes.length - 1; i++) {
         if (scriptNodes[way.nodes[i]] && scriptNodes[way.nodes[i+1]]) {
           const u = scaleCanvasPoint(scriptNodes[way.nodes[i]]);
           const v = scaleCanvasPoint(scriptNodes[way.nodes[i + 1]]);
-          ctx.beginPath(); ctx.moveTo(u.x, u.y); ctx.lineTo(v.x, v.y); ctx.stroke();
+           ctx.beginPath(); ctx.moveTo(u.x, u.y); ctx.lineTo(v.x, v.y); ctx.stroke();
         }
       }
     });
 
     if (pathResult?.path.length) {
       ctx.strokeStyle = 'red'; 
-      ctx.lineWidth = 3; 
+      ctx.lineWidth = 3;
       ctx.shadowColor = 'red'; 
       ctx.shadowBlur = 8;
       ctx.setLineDash([10, 5]); ctx.lineDashOffset = -dashOffset;
@@ -429,7 +500,9 @@ const DijkstraMapPage: NextPage = () => {
         const startPathNode = scaleCanvasPoint(scriptNodes[pathResult.path[0]]);
         ctx.moveTo(startPathNode.x, startPathNode.y);
         for (let i = 1; i < pathResult.path.length; i++) {
-          if (scriptNodes[pathResult.path[i]]) ctx.lineTo(scaleCanvasPoint(scriptNodes[pathResult.path[i]]).x, scaleCanvasPoint(scriptNodes[pathResult.path[i]]).y);
+          if (scriptNodes[pathResult.path[i]]) {
+            ctx.lineTo(scaleCanvasPoint(scriptNodes[pathResult.path[i]]).x, scaleCanvasPoint(scriptNodes[pathResult.path[i]]).y);
+          }
         }
         ctx.stroke();
       }
@@ -469,22 +542,35 @@ const DijkstraMapPage: NextPage = () => {
   const getClosestNodeIndex = useCallback((canvasX: number, canvasY: number): number | null => {
     if (!scalingParams || scriptNodes.length === 0 || !canvasRef.current) return null;
     
-    const graphX = (canvasX - scalingParams.padding) / scalingParams.scaleX + scalingParams.minX;
-    const graphY = (canvasY - scalingParams.padding) / scalingParams.scaleY + scalingParams.minY;
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = rect.width / canvas.width;
+    const scaleY = rect.height / canvas.height;
+    
+    const internalX = canvasX / scaleX;
+    const internalY = canvasY / scaleY;
+    
+    const graphX = (internalX - scalingParams.padding) / scalingParams.scaleX + scalingParams.minX;
+    const graphY = (internalY - scalingParams.padding) / scalingParams.scaleY + scalingParams.minY;
 
-    let closestIndex = -1; let minSqDist = Infinity;
+    let closestIndex = -1; 
+    let minSqDist = Infinity;
+    
     for (let i = 0; i < scriptNodes.length; i++) {
-      const dx = graphX - scriptNodes[i].x; const dy = graphY - scriptNodes[i].y;
+      const dx = graphX - scriptNodes[i].x; 
+      const dy = graphY - scriptNodes[i].y;
       const sqDist = dx * dx + dy * dy;
-      if (sqDist < minSqDist) { minSqDist = sqDist; closestIndex = i; }
+      if (sqDist < minSqDist) { 
+        minSqDist = sqDist; 
+        closestIndex = i;
+      }
     }
     
-    const pixelThreshold = 20; 
-    const minPixelScale = Math.min(Math.abs(scalingParams.scaleX), Math.abs(scalingParams.scaleY));
-    if (minPixelScale === 0) return closestIndex !== -1 ? closestIndex : null; 
+    const scaleFactor = Math.min(scaleX, scaleY);
+    const threshold = Math.max(15 / scaleFactor, 8);
+    const distanceInPixels = Math.sqrt(minSqDist) * Math.min(Math.abs(scalingParams.scaleX), Math.abs(scalingParams.scaleY)) * scaleFactor;
     
-    const thresholdInGraphUnits = (pixelThreshold / minPixelScale);
-    return (closestIndex !== -1 && Math.sqrt(minSqDist) < thresholdInGraphUnits) ? closestIndex : null;
+    return (closestIndex !== -1 && distanceInPixels < threshold * 1.5) ? closestIndex : null;
 
   }, [scriptNodes, scalingParams]);
 
@@ -494,7 +580,7 @@ const DijkstraMapPage: NextPage = () => {
 
     const handleClick = (event: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left; const y = event.clientY - rect.top;
+     const x = event.clientX - rect.left; const y = event.clientY - rect.top;
       const closestNodeIdx = getClosestNodeIndex(x, y);
 
       if (closestNodeIdx === null) return;
@@ -526,21 +612,31 @@ const DijkstraMapPage: NextPage = () => {
         const startNodeIdx = newSelectedIndices[0]; const endNodeIdx = newSelectedIndices[1];
         const result = dijkstraInternal(startNodeIdx, endNodeIdx, scriptNodes, adj);
         
-        if (!result) {
-          setTimeout(() => toast({ variant: "destructive", title: "Caminho não encontrado" }), 0);
-          setPathResultText('Não existe caminho entre os nós selecionados.');
+        if (!result.success) {
+          const errorMessage = result.error?.type === 'ONE_WAY_BLOCKED' ? 
+            'Caminho bloqueado por vias com mão única' : 
+            'Caminho não encontrado';
+          
+          setTimeout(() => toast({ 
+            variant: "destructive", 
+            title: errorMessage,
+            description: result.error?.details || 'Tente selecionar nós diferentes.'
+          }), 0);
+          
+          setPathResultText(result.error?.message || 'Não existe caminho entre os nós selecionados.');
         } else {
-          const pathNodeIds = result.path.map(idx => scriptNodes[idx].id).join(' -> ');
-          const pathNodeCoords = result.path.map(i => `Nó ${scriptNodes[i].id} (Lon: ${appNodes[i].originalLon.toFixed(5)}, Lat: ${appNodes[i].originalLat.toFixed(5)})`).join('\n');
+          const pathNodeIds = result.result!.path.map(idx => scriptNodes[idx].id).join(' -> ');
+          const pathNodeCoords = result.result!.path.map(i => `Nó ${scriptNodes[i].id} (Lon: ${appNodes[i].originalLon.toFixed(5)}, Lat: ${appNodes[i].originalLat.toFixed(5)})`).join('\n');
           const resultString = 
             `Menor Caminho:\nOrigem: Nó ${scriptNodes[startNodeIdx].id} (Lat: ${appNodes[startNodeIdx].originalLat.toFixed(5)}, Lon: ${appNodes[startNodeIdx].originalLon.toFixed(5)})\n` +
             `Destino: Nó ${scriptNodes[endNodeIdx].id} (Lat: ${appNodes[endNodeIdx].originalLat.toFixed(5)}, Lon: ${appNodes[endNodeIdx].originalLon.toFixed(5)})\n` +
-            `---------------------------------\nDistância: ${result.distance.toFixed(3)}\nTempo de processamento: ${result.processingTimeMs.toFixed(2)} ms\n` +
-            `Nós visitados: ${result.visitedNodesCount}\n---------------------------------\nCaminho (IDs):\n${pathNodeIds}\n` +
+            `---------------------------------\nDistância: ${result.result!.distance.toFixed(3)}\nTempo de processamento: ${result.result!.processingTimeMs.toFixed(2)} ms\n` +
+            `Nós visitados: ${result.result!.visitedNodesCount}\n---------------------------------\nCaminho (IDs):\n${pathNodeIds}\n` +
             `---------------------------------\nCoordenadas:\n${pathNodeCoords}`;
           
-          setPathResultText(resultString); setPathResult(result);
-          setTimeout(() => toast({ title: "Caminho Encontrado!", description: `Distância: ${result.distance.toFixed(3)}.` }), 0);
+          setPathResultText(resultString); 
+          setPathResult(result.result || null);
+          setTimeout(() => toast({ title: "Caminho Encontrado!", description: `Distância: ${result.result!.distance.toFixed(3)}.` }), 0);
         }
       }
     };
@@ -584,7 +680,7 @@ const DijkstraMapPage: NextPage = () => {
     <Header />
 
     <div className="container mx-auto py-8 px-4 flex flex-col items-center min-h-[calc(100vh-8rem)] pt-1">
-      <Card className="w-full max-w-4xl mb-8 bg-card/80 backdrop-blur-md shadow-xl border-border/50">
+      <Card className="w-full max-w-7xl mb-8 bg-card/80 backdrop-blur-md shadow-xl border-border/50">
         <CardHeader className="text-center">
           <MapIcon className="mx-auto h-12 w-12 text-primary mb-2" />
           <CardTitle className="text-3xl font-headline text-primary">Mapa Interativo com Dijkstra</CardTitle>
@@ -625,7 +721,7 @@ const DijkstraMapPage: NextPage = () => {
         </CardContent>
       </Card>
 
-      <Card className="w-full max-w-4xl bg-card/80 backdrop-blur-md shadow-xl border-border/50">
+      <Card className="w-full max-w-7xl bg-card/80 backdrop-blur-md shadow-xl border-border/50">
         <CardHeader>
           <div className="flex justify-between items-start">
             <div>
@@ -646,12 +742,14 @@ const DijkstraMapPage: NextPage = () => {
           </div>
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center p-2 sm:p-4">
-          <canvas
-            ref={canvasRef}
-            width={700}
-            height={450}
-            className="border border-border/60 rounded-md bg-background/30 shadow-inner"
-          />
+          <div className="w-full max-w-7xl overflow-auto">
+            <canvas
+              ref={canvasRef}
+              width={1400}
+              height={900}
+              className="border border-border/60 rounded-md bg-background/30 shadow-inner w-full h-auto"
+            />
+          </div>
           {appNodes.length === 0 && !isLoading && (
             <p className="mt-4 text-muted-foreground">
               Carregue um arquivo OSM ou POLY para visualizar o grafo.
@@ -678,18 +776,35 @@ const DijkstraMapPage: NextPage = () => {
               })}
             </div>
           )}
+
+          {/* Legenda */}
+          {appNodes.length > 0 && (
+            <div className="mt-4 w-full text-xs text-muted-foreground space-y-1">
+              <p className="font-medium text-foreground">Legenda:</p>
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2">
+                  <div className="w-4 h-0.5 bg-[#4ecdc4]"></div>
+                  <span>Vias</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-4 h-2 bg-red-500 rounded-full"></div>
+                  <span>Caminho encontrado</span>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
       {pathResultText && (
-        <Card className="w-full max-w-4xl mt-8 bg-card/80 backdrop-blur-md shadow-xl border-border/50">
+        <Card className="w-full max-w-7xl mt-8 bg-card/80 backdrop-blur-md shadow-xl border-border/50">
           <CardHeader>
             <CardTitle className="text-xl font-headline text-primary flex items-center">
               <FileTextIcon className="mr-2 h-6 w-6" /> Resultado do Caminho
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <pre className="text-sm text-foreground whitespace-pre-wrap bg-background/50 p-4 rounded-md overflow-x-auto">
+          <CardContent className="p-6">
+            <pre className="text-sm text-foreground whitespace-pre-wrap bg-background/50 p- rounded-md">
               {pathResultText}
             </pre>
           </CardContent>
