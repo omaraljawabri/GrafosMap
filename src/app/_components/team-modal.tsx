@@ -8,7 +8,7 @@ import {
 import { Button } from "./ui/button";
 
 const teamMembers = [
-  { name: "Omar AL Jawabri", role: "Full-Stack", initials: "OJ" },
+  { name: "Omar Al Jawabri", role: "Full-Stack", initials: "OJ" },
   { name: "Stephano Viglio", role: "Full-Stack", initials: "SV" },
   { name: "Hugo Borges", role: "Full-Stack", initials: "HB" },
   { name: "Pedro Augusto", role: "Full-Stack", initials: "PA" },
