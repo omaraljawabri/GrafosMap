@@ -222,17 +222,17 @@ const DijkstraMapPage: NextPage = () => {
         setWays(newParsedWays);
         buildGraphInternal(newParsedScriptNodes, newParsedWays);
         setMapStats(`Arquivo convertido e grafo criado.\nNós: ${newParsedScriptNodes.length}\nVias: ${newParsedWays.length}`);
-        setTimeout(() => toast({ title: "Arquivo Processado", description: "Grafo criado a partir do arquivo OSM." }), 0);
+        setTimeout(() => toast({ title: "Arquivo .osm processado", description: "Grafo gerado com sucesso a partir do arquivo OSM." }), 0);
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       } catch (error) {
-        setTimeout(() => toast({ title: "Erro de Processamento", description: "Ocorreu um erro ao processar o arquivo.", variant: "destructive" }), 0);
+        setTimeout(() => toast({ title: "Erro de Processamento", description: "Ocorreu um erro ao processar o arquivo OSM. Tente novamente.", variant: "destructive" }), 0);
         setAppNodes([]); setScriptNodes([]); setWays([]); setAdj([]); setSelectedNodeIndices([]); setMapStats(null);
       } finally {
         setIsLoading(false);
       }
     };
     reader.onerror = () => {
-      setTimeout(() => toast({ title: "Erro de Leitura", description: "Não foi possível ler o arquivo.", variant: "destructive" }), 0);
+      setTimeout(() => toast({ title: "Erro de Leitura de Arquivo", description: "Selecione um arquivo .osm válido.", variant: "destructive" }), 0);
       setIsLoading(false);
     };
     reader.readAsText(osmFile);
@@ -247,7 +247,7 @@ const DijkstraMapPage: NextPage = () => {
       setScalingParams(null);
       canvasRef.current?.getContext('2d')?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     } else {
-      toast({ title: "Erro de Arquivo", description: "Selecione um arquivo .poly válido.", variant: "destructive" });
+      toast({ title: "Erro de Leitura de Arquivo", description: "Selecione um arquivo .poly válido.", variant: "destructive" });
       setPolyFile(null);
     }
   };
@@ -304,7 +304,7 @@ const DijkstraMapPage: NextPage = () => {
       setWays(newParsedWays);
       buildGraphInternal(script, newParsedWays);
       setMapStats(`Arquivo .poly convertido com sucesso.\nNós: ${script.length}\nArestas: ${newParsedWays.length}`);
-      toast({ title: "Arquivo .poly processado", description: "Grafo gerado com sucesso." });
+      toast({ title: "Arquivo .poly processado", description: "Grafo gerado com sucesso a partir do arquivo POLY." });
     } catch (e) {
       console.error(e);
       toast({ title: "Erro", description: "Falha ao processar arquivo .poly personalizado.", variant: "destructive" });
@@ -312,7 +312,7 @@ const DijkstraMapPage: NextPage = () => {
   };
 
   reader.onerror = () => {
-    toast({ title: "Erro", description: "Erro ao ler arquivo .poly.", variant: "destructive" });
+    toast({ title: "Erro de Processamento", description: "Ocorreu um erro ao processar o arquivo POLY. Tente novamente.", variant: "destructive" });
   };
 
   reader.readAsText(polyFile);
