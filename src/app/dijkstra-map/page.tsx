@@ -162,6 +162,9 @@ const DijkstraMapPage: NextPage = () => {
   const [modoGrafoAleatorio, setModoGrafoAleatorio] = useState(false);
   const [numVertices, setNumVertices] = useState('');
   const [mostrarIds, setMostrarIds] = useState(false);
+  const [modoRemoverArestas, setModoRemoverArestas] = useState(false);
+  const [selectedVerticesToRemove, setSelectedVerticesToRemove] = useState<number[]>([]);
+  
   const [graphType, setGraphType] = useState<GraphType>({
     isDirected: false,
     isWeighted: true,
@@ -641,12 +644,13 @@ setMapStats(`Arquivo .osm convertido e grafo criado.\nNós: ${newParsedScriptNod
   }, [scriptNodes, scalingParams]);
 
   useEffect(() => {
+    if (modoRemoverArestas) return;
     const canvas = canvasRef.current;
     if (!canvas || scriptNodes.length === 0 || !scalingParams || isLoading) return;
 
     const handleClick = (event: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
-     const x = event.clientX - rect.left; const y = event.clientY - rect.top;
+      const x = event.clientX - rect.left; const y = event.clientY - rect.top;
       const closestNodeIdx = getClosestNodeIndex(x, y);
 
       if (closestNodeIdx === null) return;
@@ -706,19 +710,19 @@ setMapStats(`Arquivo .osm convertido e grafo criado.\nNós: ${newParsedScriptNod
     `Nós visitados: ${result.result!.visitedNodesCount}\n---------------------------------\nCaminho (IDs):\n${pathNodeIds}\n` +
     `---------------------------------\nCoordenadas:\n${pathNodeCoords}`;
 
-  setPathResultText(resultString);
-  setPathResult(result.result || null);
-  setTimeout(() => toast({
-    title: "Caminho Encontrado!",
-    description: `Distância: ${result.result!.distance.toFixed(3)}.`,
-  }), 0);
-}
+        setPathResultText(resultString);
+        setPathResult(result.result || null);
+        setTimeout(() => toast({
+          title: "Caminho Encontrado!",
+          description: `Distância: ${result.result!.distance.toFixed(3)}.`,
+        }), 0);
+      }
 
       }
     };
     canvas.addEventListener('click', handleClick);
     return () => canvas.removeEventListener('click', handleClick);
-  }, [canvasRef, scriptNodes, adj, scalingParams, getClosestNodeIndex, dijkstraInternal, toast, isLoading, selectedNodeIndices, appNodes]);
+  }, [modoRemoverArestas, canvasRef, scriptNodes, adj, scalingParams, getClosestNodeIndex, dijkstraInternal, toast, isLoading, selectedNodeIndices, appNodes]);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     if (event.target.files?.[0]) {
@@ -854,6 +858,7 @@ useEffect(() => {
   setPathResult(null);
   setPathResultText(null);
   setMapStats("");
+  setModoRemoverArestas(false);
 }, [modoGrafoAleatorio]);
 
 useEffect(() => {
@@ -897,6 +902,73 @@ useEffect(() => {
     }
   });
 }, [modoGrafoAleatorio, scriptNodes, scalingParams, ways, mostrarIds, appNodes, scaleCanvasPoint]);
+
+useEffect(() => {
+  if (modoRemoverArestas) {
+    setSelectedNodeIndices([]);
+    setPathResult(null);
+    setPathResultText(null);
+  }
+
+  if (modoGrafoAleatorio) {
+    buildGraphInternal(scriptNodes, ways);
+  }
+}, [modoRemoverArestas, modoGrafoAleatorio, scriptNodes, ways]);
+
+useEffect(() => {
+  if (!modoRemoverArestas) return; // só ativa se o modo remoção estiver ligado
+
+  const canvas = canvasRef.current;
+  if (!canvas || scriptNodes.length === 0 || !scalingParams) return;
+
+  // Para guardar o primeiro nó clicado
+  let firstNodeIdx: number | null = null;
+
+  const handleClickRemoverAresta = (event: MouseEvent) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    // Função que retorna índice do nó mais próximo da posição clicada
+    const closestNodeIdx = getClosestNodeIndex(x, y);
+    if (closestNodeIdx === null) return;
+
+    if (firstNodeIdx === null) {
+      firstNodeIdx = closestNodeIdx;
+      toast({ title: "Primeiro vértice selecionado", description: `Vértice ID: ${appNodes[closestNodeIdx]?.id}` });
+    } else {
+      // Segundo nó clicado, tenta remover a aresta entre firstNodeIdx e closestNodeIdx
+      const from = firstNodeIdx;
+      const to = closestNodeIdx;
+
+      // Checa se a aresta existe em ways
+      const edgeIndex = ways.findIndex(w =>
+        (w.nodes[0] === from && w.nodes[1] === to) ||
+        (w.nodes[0] === to && w.nodes[1] === from)
+      );
+
+      if (edgeIndex === -1) {
+        toast({ title: "Aresta não encontrada", description: `Não existe aresta entre os vértices selecionados.` });
+      } else {
+        // Remove a aresta do array ways
+        const newWays = [...ways];
+        newWays.splice(edgeIndex, 1);
+        setWays(newWays);
+        toast({ title: "Aresta removida", description: `Aresta entre ${appNodes[from]?.id} e ${appNodes[to]?.id} removida.` });
+      }
+
+      // Reseta firstNodeIdx para a próxima remoção
+      firstNodeIdx = null;
+    }
+  };
+
+  canvas.addEventListener("click", handleClickRemoverAresta);
+
+  return () => {
+    canvas.removeEventListener("click", handleClickRemoverAresta);
+  };
+}, [modoRemoverArestas, canvasRef, scriptNodes, scalingParams, ways, appNodes, getClosestNodeIndex]);
+
 
 
 
@@ -981,6 +1053,14 @@ useEffect(() => {
               </Button>
               <Button onClick={gerarArestasPorTriangulacao}>
                 Gerar Arestas por Triangulação
+              </Button>
+            </div>
+            <div className="flex gap-4 items-center justify-center mt-4">
+              <Button
+                variant={modoRemoverArestas ? "destructive" : "outline"}
+                onClick={() => setModoRemoverArestas(prev => !prev)}
+              >
+                {modoRemoverArestas ? "Cancelar Remoção de Arestas" : "Ativar Remoção de Arestas"}
               </Button>
             </div>
           </CardContent>
