@@ -165,6 +165,7 @@ const DijkstraMapPage: NextPage = () => {
   const [modoRemoverArestas, setModoRemoverArestas] = useState(false);
   const [selectedVerticesToRemove, setSelectedVerticesToRemove] = useState<number[]>([]);
   const [showColoredVertices, setShowColoredVertices] = useState(true);
+  const [mostrarPesosArestas, setMostrarPesosArestas] = useState(false);
   
   const [graphType, setGraphType] = useState<GraphType>({
     isDirected: false,
@@ -582,6 +583,17 @@ const handleFileUploadAndParse = useCallback(async () => {
         }
 
         ctx.stroke();
+
+        if (mostrarPesosArestas) {
+          const weight = distancia(from, to);
+          const midX = (u.x + v.x) / 2;
+          const midY = (u.y + v.y) / 2;
+          ctx.fillStyle = document.documentElement.classList.contains('dark') ? '#ffffff' : '#000000';
+          ctx.font = '8px Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(weight.toFixed(1), midX, midY);
+        }
       }
     });
 
@@ -633,7 +645,21 @@ const handleFileUploadAndParse = useCallback(async () => {
       }
     });
 
-  }, [scriptNodes, ways, pathResult, selectedNodeIndices, scalingParams, scaleCanvasPoint, dashOffset, appNodes, showColoredVertices]);
+    // Desenhar IDs de todos os vértices se ativado
+    if (mostrarIds) {
+      scriptNodes.forEach((node, index) => {
+        const p = scaleCanvasPoint(node);
+        const appNode = appNodes[index];
+        if (appNode) {
+          ctx.fillStyle = 'blue';
+          ctx.font = "10px Arial";
+          ctx.textAlign = "center";
+          ctx.fillText(appNode.id, p.x, p.y - 10);
+        }
+      });
+    }
+
+  }, [scriptNodes, ways, pathResult, selectedNodeIndices, scalingParams, scaleCanvasPoint, dashOffset, appNodes, showColoredVertices, mostrarPesosArestas, mostrarIds]);
 
   useEffect(() => {
     if (pathResult?.path.length) {
@@ -924,6 +950,17 @@ useEffect(() => {
       ctx.moveTo(u.x, u.y);
       ctx.lineTo(v.x, v.y);
       ctx.stroke();
+
+      if (mostrarPesosArestas) {
+        const weight = distancia(scriptNodes[way.nodes[i]], scriptNodes[way.nodes[i + 1]]);
+        const midX = (u.x + v.x) / 2;
+        const midY = (u.y + v.y) / 2;
+        ctx.fillStyle = document.documentElement.classList.contains('dark') ? '#ffffff' : '#000000';
+        ctx.font = '8px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(weight.toFixed(1), midX, midY);
+      }
     }
   });
 
@@ -942,7 +979,7 @@ useEffect(() => {
       ctx.fillText(appNodes[index]?.id ?? "", x, y - 10);
     }
   });
-}, [modoGrafoAleatorio, scriptNodes, scalingParams, ways, mostrarIds, appNodes, scaleCanvasPoint]);
+}, [modoGrafoAleatorio, scriptNodes, scalingParams, ways, mostrarIds, appNodes, scaleCanvasPoint, mostrarPesosArestas]);
 
 useEffect(() => {
   if (modoRemoverArestas) {
