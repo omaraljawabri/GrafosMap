@@ -1126,9 +1126,6 @@ useEffect(() => {
 
             {/* Linha 2: Botões Enumerar e Triangulação */}
             <div className="flex gap-4 items-center justify-center">
-              <Button variant="outline" onClick={() => setMostrarIds(prev => !prev)}>
-                {mostrarIds ? "Ocultar IDs" : "Enumerar Vértices"}
-              </Button>
               <Button onClick={gerarArestasPorTriangulacao}>
                 Gerar Arestas por Triangulação
               </Button>
@@ -1243,6 +1240,14 @@ useEffect(() => {
                   <div className="w-3 h-3 rounded-full bg-blue-500"></div>
                   <span>Nó de destino</span>
                 </div>
+                {mostrarPesosArestas && (
+                  <div className="flex items-center space-x-2">
+                    <div className="w-8 h-4 text-center text-xs text-foreground flex items-center justify-center">
+                      <span>123.4</span>
+                    </div>
+                    <span>Peso da aresta</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
