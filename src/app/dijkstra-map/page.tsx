@@ -68,9 +68,9 @@ interface ScalingParams {
   maxX: number;
   minY: number;
   maxY: number;
-  scaleX: number;
-  scaleY: number;
-  padding: number;
+  scale: number;
+  offsetX: number;
+  offsetY: number;
   canvasWidth: number;
   canvasHeight: number;
 }
@@ -518,7 +518,9 @@ const handleFileUploadAndParse = useCallback(async () => {
       if (canvas) canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
       return;
     }
-    const padding = 20; const canvasWidth = canvas.width; const canvasHeight = canvas.height;
+    const padding = 5; 
+    const canvasWidth = canvas.width; 
+    const canvasHeight = canvas.height;
     
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     if (scriptNodes.length > 0) {
@@ -532,9 +534,15 @@ const handleFileUploadAndParse = useCallback(async () => {
     const scaleX = (dX === 0) ? 1 : (canvasWidth - 2 * padding) / dX;
     const scaleY = (dY === 0) ? 1 : (canvasHeight - 2 * padding) / dY;
     
+    const scale = Math.min(scaleX, scaleY);
+    const newWidth = dX * scale;
+    const newHeight = dY * scale;
+    const offsetX = (canvasWidth - newWidth) / 2;
+    const offsetY = (canvasHeight - newHeight) / 2;
+    
     setScalingParams({ 
-        minX, maxX, minY, maxY, scaleX, scaleY, 
-        padding, canvasWidth, canvasHeight 
+        minX, maxX, minY, maxY, scale, offsetX, offsetY,
+        canvasWidth, canvasHeight 
     });
   }, [scriptNodes, osmFile]);
   
@@ -544,8 +552,8 @@ const handleFileUploadAndParse = useCallback(async () => {
         return { x: scalingParams.canvasWidth / 2, y: scalingParams.canvasHeight / 2 };
     }
     return {
-      x: scalingParams.padding + (node.x - scalingParams.minX) * scalingParams.scaleX,
-      y: scalingParams.padding + (node.y - scalingParams.minY) * scalingParams.scaleY
+      x: scalingParams.offsetX + (node.x - scalingParams.minX) * scalingParams.scale,
+      y: scalingParams.offsetY + (node.y - scalingParams.minY) * scalingParams.scale
     };
   }, [scalingParams]);
 
@@ -678,16 +686,8 @@ const handleFileUploadAndParse = useCallback(async () => {
   const getClosestNodeIndex = useCallback((canvasX: number, canvasY: number): number | null => {
     if (!scalingParams || scriptNodes.length === 0 || !canvasRef.current) return null;
     
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = rect.width / canvas.width;
-    const scaleY = rect.height / canvas.height;
-    
-    const internalX = canvasX / scaleX;
-    const internalY = canvasY / scaleY;
-    
-    const graphX = (internalX - scalingParams.padding) / scalingParams.scaleX + scalingParams.minX;
-    const graphY = (internalY - scalingParams.padding) / scalingParams.scaleY + scalingParams.minY;
+    const graphX = (canvasX - scalingParams.offsetX) / scalingParams.scale + scalingParams.minX;
+    const graphY = (canvasY - scalingParams.offsetY) / scalingParams.scale + scalingParams.minY;
 
     let closestIndex = -1; 
     let minSqDist = Infinity;
@@ -702,9 +702,9 @@ const handleFileUploadAndParse = useCallback(async () => {
       }
     }
     
-    const scaleFactor = Math.min(scaleX, scaleY);
-    const threshold = Math.max(15 / scaleFactor, 8);
-    const distanceInPixels = Math.sqrt(minSqDist) * Math.min(Math.abs(scalingParams.scaleX), Math.abs(scalingParams.scaleY)) * scaleFactor;
+    const threshold = 15;
+    const distanceInGraphUnits = Math.sqrt(minSqDist);
+    const distanceInPixels = distanceInGraphUnits * scalingParams.scale;
     
     return (closestIndex !== -1 && distanceInPixels < threshold * 1.5) ? closestIndex : null;
 
