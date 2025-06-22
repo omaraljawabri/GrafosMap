@@ -212,7 +212,7 @@ const DijkstraMapPage: NextPage = () => {
     
   }, [distancia]);
 
-  const handleFileUploadAndParse = useCallback(async () => {
+const handleFileUploadAndParse = useCallback(async () => {
   if (!osmFile) {
     setTimeout(() => toast({
       title: "Nenhum Arquivo",
@@ -274,9 +274,8 @@ const DijkstraMapPage: NextPage = () => {
       const xs = originalCoords.map(c => c.x);
       const ys = originalCoords.map(c => c.y);
       const minX = Math.min(...xs);
-      const minY = Math.min(...ys);
       const maxY = Math.max(...ys);
-      const escala = 2; // 1 pixel = 2 metros (mesma do .poly)
+      const escala = 2; // 1 pixel = 2 metros
 
       for (let i = 0; i < originalCoords.length; i++) {
         const scaledX = (xs[i] - minX) / escala;
@@ -292,8 +291,13 @@ const DijkstraMapPage: NextPage = () => {
       wayElements.forEach(wayEl => {
         const nds = Array.from(wayEl.getElementsByTagName('nd'));
         const ndRefs: number[] = nds.map(nd => idToIndex[nd.getAttribute('ref')!]).filter(ref => ref !== undefined);
+
+        const oneway = Array.from(wayEl.getElementsByTagName('tag')).some(
+          tag => tag.getAttribute('k') === 'oneway' && tag.getAttribute('v') === 'yes'
+        );
+
         if (ndRefs.length > 1) {
-          newParsedWays.push({ nodes: ndRefs, oneway: false }); // Ignora sentido, cria sempre as arestas
+          newParsedWays.push({ nodes: ndRefs, oneway }); // ⬅️ mantém direção
         }
       });
 
@@ -301,8 +305,15 @@ const DijkstraMapPage: NextPage = () => {
       setScriptNodes(newParsedScriptNodes);
       setWays(newParsedWays);
       buildGraphInternal(newParsedScriptNodes, newParsedWays);
-      const totalEdges = newParsedWays.reduce((sum, way) => sum + (way.nodes.length - 1), 0);
-setMapStats(`Arquivo .osm convertido e grafo criado.\nNós: ${newParsedScriptNodes.length}\nArestas: ${totalEdges}`);
+
+      // Contagem correta de arestas, levando em conta mão única
+      const totalEdges = newParsedWays.reduce((sum, way) => {
+        const segments = way.nodes.length - 1;
+        return sum + (way.oneway ? segments : segments * 2);
+      }, 0);
+
+      setMapStats(`Arquivo .osm convertido e grafo criado.\nNós: ${newParsedScriptNodes.length}\nArestas: ${totalEdges}`);
+
       setTimeout(() => toast({
         title: "Arquivo .osm processado",
         description: "Grafo gerado com sucesso a partir do arquivo OSM."
@@ -547,16 +558,34 @@ setMapStats(`Arquivo .osm convertido e grafo criado.\nNós: ${newParsedScriptNod
     const ctx = canvas.getContext('2d'); if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.strokeStyle = 'gray';
-          ctx.lineWidth = 1;
+    ctx.lineWidth = 1;
+    ctx.lineWidth = 1;
     ways.forEach(way => {
       for (let i = 0; i < way.nodes.length - 1; i++) {
-        if (scriptNodes[way.nodes[i]] && scriptNodes[way.nodes[i+1]]) {
-          const u = scaleCanvasPoint(scriptNodes[way.nodes[i]]);
-          const v = scaleCanvasPoint(scriptNodes[way.nodes[i + 1]]);
-           ctx.beginPath(); ctx.moveTo(u.x, u.y); ctx.lineTo(v.x, v.y); ctx.stroke();
+        const fromIdx = way.nodes[i];
+        const toIdx = way.nodes[i + 1];
+
+        const from = scriptNodes[fromIdx];
+        const to = scriptNodes[toIdx];
+        if (!from || !to) continue;
+
+        const u = scaleCanvasPoint(from);
+        const v = scaleCanvasPoint(to);
+
+        ctx.beginPath();
+        ctx.moveTo(u.x, u.y);
+        ctx.lineTo(v.x, v.y);
+
+        if (way.oneway) {
+          ctx.strokeStyle = '#f59e0b'; 
+        } else {
+          ctx.strokeStyle = '#94a3b8'; 
         }
+
+        ctx.stroke();
       }
     });
+
 
     if (pathResult?.path.length) {
       ctx.strokeStyle = 'red'; 
@@ -1135,14 +1164,26 @@ useEffect(() => {
           {appNodes.length > 0 && (
             <div className="mt-4 w-full text-xs text-muted-foreground space-y-1">
               <p className="font-medium text-foreground">Legenda:</p>
-              <div className="flex items-center space-x-4">
+              <div className="flex flex-wrap gap-4">
                 <div className="flex items-center space-x-2">
-                  <div className="w-4 h-0.5 bg-[#4ecdc4]"></div>
-                  <span>Vias</span>
+                  <div className="w-4 h-0.5 bg-[#94a3b8]"></div>
+                  <span>Mão dupla</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-4 h-0.5 bg-[#f59e0b]"></div>
+                  <span>Mão única</span>
                 </div>
                 <div className="flex items-center space-x-2">
                   <div className="w-4 h-2 bg-red-500 rounded-full"></div>
                   <span>Caminho encontrado</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                  <span>Nó de origem</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                  <span>Nó de destino</span>
                 </div>
               </div>
             </div>
