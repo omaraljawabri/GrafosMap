@@ -9,6 +9,8 @@ import { Label } from '../_components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../_components/ui/card';
 import { UploadCloud, Route, MapIcon, FileTextIcon, CopyIcon } from 'lucide-react';
 import { useToast } from "../_hooks/use-toast";
+import { Switch } from "@/components/ui/switch";
+import { Delaunay } from "d3-delaunay";
 
 interface ScriptNode {
   id: string;
@@ -157,6 +159,12 @@ const DijkstraMapPage: NextPage = () => {
   const [mapStats, setMapStats] = useState<string | null>(null);
   const [scalingParams, setScalingParams] = useState<ScalingParams | null>(null);
   const [dashOffset, setDashOffset] = useState(0);
+  const [modoGrafoAleatorio, setModoGrafoAleatorio] = useState(false);
+  const [numVertices, setNumVertices] = useState('');
+  const [mostrarIds, setMostrarIds] = useState(false);
+  const [modoRemoverArestas, setModoRemoverArestas] = useState(false);
+  const [selectedVerticesToRemove, setSelectedVerticesToRemove] = useState<number[]>([]);
+  
   const [graphType, setGraphType] = useState<GraphType>({
     isDirected: false,
     isWeighted: true,
@@ -665,12 +673,13 @@ const handleFileUploadAndParse = useCallback(async () => {
   }, [scriptNodes, scalingParams]);
 
   useEffect(() => {
+    if (modoRemoverArestas) return;
     const canvas = canvasRef.current;
     if (!canvas || scriptNodes.length === 0 || !scalingParams || isLoading) return;
 
     const handleClick = (event: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
-     const x = event.clientX - rect.left; const y = event.clientY - rect.top;
+      const x = event.clientX - rect.left; const y = event.clientY - rect.top;
       const closestNodeIdx = getClosestNodeIndex(x, y);
 
       if (closestNodeIdx === null) return;
@@ -730,19 +739,19 @@ const handleFileUploadAndParse = useCallback(async () => {
     `Nós visitados: ${result.result!.visitedNodesCount}\n---------------------------------\nCaminho (IDs):\n${pathNodeIds}\n` +
     `---------------------------------\nCoordenadas:\n${pathNodeCoords}`;
 
-  setPathResultText(resultString);
-  setPathResult(result.result || null);
-  setTimeout(() => toast({
-    title: "Caminho Encontrado!",
-    description: `Distância: ${result.result!.distance.toFixed(3)}.`,
-  }), 0);
-}
+        setPathResultText(resultString);
+        setPathResult(result.result || null);
+        setTimeout(() => toast({
+          title: "Caminho Encontrado!",
+          description: `Distância: ${result.result!.distance.toFixed(3)}.`,
+        }), 0);
+      }
 
       }
     };
     canvas.addEventListener('click', handleClick);
     return () => canvas.removeEventListener('click', handleClick);
-  }, [canvasRef, scriptNodes, adj, scalingParams, getClosestNodeIndex, dijkstraInternal, toast, isLoading, selectedNodeIndices, appNodes]);
+  }, [modoRemoverArestas, canvasRef, scriptNodes, adj, scalingParams, getClosestNodeIndex, dijkstraInternal, toast, isLoading, selectedNodeIndices, appNodes]);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     if (event.target.files?.[0]) {
@@ -775,11 +784,229 @@ const handleFileUploadAndParse = useCallback(async () => {
     }
   }, [toast]);
 
+ 
+
+const gerarArestasPorTriangulacao = useCallback(() => {
+  if (scriptNodes.length < 3) {
+    toast({ title: "Arestas não geradas", description: "Precisa ter pelo menos 3 vértices.", variant: "destructive" });
+    return;
+  }
+
+  const points: [number, number][] = scriptNodes.map(n => [n.x, n.y]);
+
+  const delaunay = Delaunay.from(points);
+
+  // Pega os triângulos: array plano, cada grupo de 3 índices são vértices de um triângulo
+  const triangles = delaunay.triangles;
+
+  const newWays: Way[] = [];
+  // Percorre os triângulos em grupos de 3
+  for (let i = 0; i < triangles.length; i += 3) {
+    const a = triangles[i];
+    const b = triangles[i + 1];
+    const c = triangles[i + 2];
+
+    // Adiciona as 3 arestas do triângulo (sem duplicatas)
+    addEdge(newWays, a, b);
+    addEdge(newWays, b, c);
+    addEdge(newWays, c, a);
+  }
+
+  function addEdge(edges: Way[], from: number, to: number) {
+  // Checa se a aresta já existe (nos dois sentidos)
+  const exists = edges.some(w =>
+    (w.nodes[0] === from && w.nodes[1] === to) ||
+    (w.nodes[0] === to && w.nodes[1] === from)
+  );
+  if (!exists) {
+    edges.push({ nodes: [from, to], oneway: false });
+  }
+}
+
+  // Atualiza o estado ways e rebuild do grafo
+  setWays(newWays);
+  buildGraphInternal(scriptNodes, newWays);
+
+  toast({ title: "Arestas Criadas", description: `Triangulação gerou ${newWays.length} arestas.` });
+
+}, [scriptNodes, buildGraphInternal, toast]);
+
+
+// Função para gerar vértices aleatórios, exclusiva para modo aleatório
+const gerarVerticesAleatoriosModoAleatorio = useCallback(() => {
+  if (!canvasRef.current) return;
+
+  const n = parseInt(numVertices);
+  if (isNaN(n) || n <= 0) {
+    toast({ title: "Número inválido", description: "Informe um número inteiro positivo.", variant: "destructive" });
+    return;
+  }
+
+  const canvasWidth = canvasRef.current.width;
+  const canvasHeight = canvasRef.current.height;
+  const padding = 10;
+
+  const newAppNodes: AppNode[] = [];
+  const newScriptNodes: ScriptNode[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const x = Math.random() * (canvasWidth - 2 * padding) + padding;
+    const y = Math.random() * (canvasHeight - 2 * padding) + padding;
+
+    const id = i.toString();
+    newAppNodes.push({ id, x, y, originalLat: y, originalLon: x });
+    newScriptNodes.push({ id, x, y });
+  }
+
+  setAppNodes(newAppNodes);
+  setScriptNodes(newScriptNodes);
+  setWays([]);
+  setAdj([]);
+  setSelectedNodeIndices([]);
+  setPathResult(null);
+  setPathResultText(null);
+  setMapStats(`Grafo aleatório gerado: ${n} vértices, 0 arestas.`);
+}, [numVertices, toast]);
+
+useEffect(() => {
+  const canvas = canvasRef.current;
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  // Limpa o canvas completamente
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Reseta todos os estados para "zero"
+  setAppNodes([]);
+  setScriptNodes([]);
+  setWays([]);
+  setAdj([]);
+  setSelectedNodeIndices([]);
+  setPathResult(null);
+  setPathResultText(null);
+  setMapStats("");
+  setModoRemoverArestas(false);
+}, [modoGrafoAleatorio]);
+
+useEffect(() => {
+  if (!modoGrafoAleatorio) return;
+
+  const canvas = canvasRef.current;
+  if (!canvas || !scalingParams) return;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Desenhar arestas
+  ctx.strokeStyle = 'gray';
+  ctx.lineWidth = 1;
+  ways.forEach(way => {
+    for (let i = 0; i < way.nodes.length - 1; i++) {
+      const u = scaleCanvasPoint(scriptNodes[way.nodes[i]]);
+      const v = scaleCanvasPoint(scriptNodes[way.nodes[i + 1]]);
+      ctx.beginPath();
+      ctx.moveTo(u.x, u.y);
+      ctx.lineTo(v.x, v.y);
+      ctx.stroke();
+    }
+  });
+
+  // Desenhar vértices
+  scriptNodes.forEach((node, index) => {
+    const { x, y } = scaleCanvasPoint(node);
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, 2 * Math.PI);
+    ctx.fillStyle = "green";
+    ctx.fill();
+
+    if (mostrarIds) {
+      ctx.fillStyle = "blue";
+      ctx.font = "10px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(appNodes[index]?.id ?? "", x, y - 10);
+    }
+  });
+}, [modoGrafoAleatorio, scriptNodes, scalingParams, ways, mostrarIds, appNodes, scaleCanvasPoint]);
+
+useEffect(() => {
+  if (modoRemoverArestas) {
+    setSelectedNodeIndices([]);
+    setPathResult(null);
+    setPathResultText(null);
+  }
+
+  if (modoGrafoAleatorio) {
+    buildGraphInternal(scriptNodes, ways);
+  }
+}, [modoRemoverArestas, modoGrafoAleatorio, scriptNodes, ways]);
+
+useEffect(() => {
+  if (!modoRemoverArestas) return; // só ativa se o modo remoção estiver ligado
+
+  const canvas = canvasRef.current;
+  if (!canvas || scriptNodes.length === 0 || !scalingParams) return;
+
+  // Para guardar o primeiro nó clicado
+  let firstNodeIdx: number | null = null;
+
+  const handleClickRemoverAresta = (event: MouseEvent) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    // Função que retorna índice do nó mais próximo da posição clicada
+    const closestNodeIdx = getClosestNodeIndex(x, y);
+    if (closestNodeIdx === null) return;
+
+    if (firstNodeIdx === null) {
+      firstNodeIdx = closestNodeIdx;
+      toast({ title: "Primeiro vértice selecionado", description: `Vértice ID: ${appNodes[closestNodeIdx]?.id}` });
+    } else {
+      // Segundo nó clicado, tenta remover a aresta entre firstNodeIdx e closestNodeIdx
+      const from = firstNodeIdx;
+      const to = closestNodeIdx;
+
+      // Checa se a aresta existe em ways
+      const edgeIndex = ways.findIndex(w =>
+        (w.nodes[0] === from && w.nodes[1] === to) ||
+        (w.nodes[0] === to && w.nodes[1] === from)
+      );
+
+      if (edgeIndex === -1) {
+        toast({ title: "Aresta não encontrada", description: `Não existe aresta entre os vértices selecionados.` });
+      } else {
+        // Remove a aresta do array ways
+        const newWays = [...ways];
+        newWays.splice(edgeIndex, 1);
+        setWays(newWays);
+        toast({ title: "Aresta removida", description: `Aresta entre ${appNodes[from]?.id} e ${appNodes[to]?.id} removida.` });
+      }
+
+      // Reseta firstNodeIdx para a próxima remoção
+      firstNodeIdx = null;
+    }
+  };
+
+  canvas.addEventListener("click", handleClickRemoverAresta);
+
+  return () => {
+    canvas.removeEventListener("click", handleClickRemoverAresta);
+  };
+}, [modoRemoverArestas, canvasRef, scriptNodes, scalingParams, ways, appNodes, getClosestNodeIndex]);
+
+
+
+
   return (
   <>
     <Header />
 
     <div className="container mx-auto py-8 px-4 flex flex-col items-center min-h-[calc(100vh-8rem)] pt-1">
+      {!modoGrafoAleatorio && (
       <Card className="w-full max-w-7xl mb-8 bg-card/80 backdrop-blur-md shadow-xl border-border/50">
         <CardHeader className="text-center">
           <MapIcon className="mx-auto h-12 w-12 text-primary mb-2" />
@@ -801,25 +1028,81 @@ const handleFileUploadAndParse = useCallback(async () => {
                 {isLoading ? 'Processando...' : 'Carregar e Processar OSM'}
               </Button>
             </div>
-            {osmFile && <p className="text-sm text-muted-foreground">Arquivo: {osmFile.name}</p>}
-          </div>
 
-          <div className="space-y-4 pt-4 border-t border-border/50 mt-6">
-            <Label htmlFor="poly-file" className="text-lg font-medium text-foreground">Arquivo .POLY</Label>
-            <div className="flex flex-col sm:flex-row gap-4 items-stretch">
-              <Input
-                id="poly-file" type="file" accept=".poly" onChange={handlePolyFileChange}
-                className="flex-grow file:mr-4 file:py-2 h-14 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+            <div className="space-y-4 pt-4 border-t border-border/50 mt-6">
+              <Label htmlFor="poly-file" className="text-lg font-medium text-foreground">Arquivo .POLY</Label>
+              <div className="flex flex-col sm:flex-row gap-4 items-stretch">
+                <Input
+                  id="poly-file" type="file" accept=".poly" onChange={handlePolyFileChange}
+                  className="flex-grow file:mr-4 file:py-2 h-14 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+                />
+                <Button onClick={handlePolyUploadAndParse} disabled={!polyFile || isLoading} className="w-full sm:w-auto h-14">
+                  <UploadCloud className="mr-2 h-5 w-5" />
+                  {isLoading ? 'Processando...' : 'Carregar e Processar POLY'}
+                </Button>
+              </div>
+              {polyFile && <p className="text-sm text-muted-foreground">Arquivo: {polyFile.name}</p>}
+            </div>
+          </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {modoGrafoAleatorio && (
+        <Card className="w-full max-w-4xl mb-8 bg-card/80 backdrop-blur-md shadow-xl border-border/50">
+          <CardHeader className="text-center">
+            <MapIcon className="mx-auto h-12 w-12 text-primary mb-2" />
+            <CardTitle className="text-3xl font-headline text-primary ">Gerador de Grafo Aleatório</CardTitle>
+            <CardDescription className="text-muted-foreground pt-1">
+              Defina o número de vértices e gere um grafo aleatório no canvas.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {/* Linha 1: Input + botão gerar vértices */}
+            <div className="flex gap-4 items-center justify-center mb-4">
+              <input
+                type="text"
+                value={numVertices}
+                onChange={e => {
+                  const onlyNums = e.target.value.replace(/\D/g, '');
+                  setNumVertices(onlyNums);
+                }}
+                placeholder="Número de vértices"
+                className="border border-border rounded px-3 py-1 w-48 text-center text-gray-900 font-semibold"
               />
-              <Button onClick={handlePolyUploadAndParse} disabled={!polyFile || isLoading} className="w-full sm:w-auto h-14">
-                <UploadCloud className="mr-2 h-5 w-5" />
-                {isLoading ? 'Processando...' : 'Carregar e Processar POLY'}
+              <Button onClick={gerarVerticesAleatoriosModoAleatorio} className="h-10">
+                Gerar Vértices Aleatórios
               </Button>
             </div>
-            {polyFile && <p className="text-sm text-muted-foreground">Arquivo: {polyFile.name}</p>}
-          </div>
-        </CardContent>
-      </Card>
+
+            {/* Linha 2: Botões Enumerar e Triangulação */}
+            <div className="flex gap-4 items-center justify-center">
+              <Button variant="outline" onClick={() => setMostrarIds(prev => !prev)}>
+                {mostrarIds ? "Ocultar IDs" : "Enumerar Vértices"}
+              </Button>
+              <Button onClick={gerarArestasPorTriangulacao}>
+                Gerar Arestas por Triangulação
+              </Button>
+            </div>
+            <div className="flex gap-4 items-center justify-center mt-4">
+              <Button
+                variant={modoRemoverArestas ? "destructive" : "outline"}
+                onClick={() => setModoRemoverArestas(prev => !prev)}
+              >
+                {modoRemoverArestas ? "Cancelar Remoção de Arestas" : "Ativar Remoção de Arestas"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+
+      <div className="flex items-center justify-center my-6 space-x-4">
+        <span className="text-sm font-medium text-muted-foreground">Importar Arquivos</span>
+        <Switch checked={modoGrafoAleatorio} onCheckedChange={setModoGrafoAleatorio} />
+        <span className="text-sm font-medium text-muted-foreground">Grafo Aleatório</span>
+      </div>
+
 
       <Card className="w-full max-w-7xl bg-card/80 backdrop-blur-md shadow-xl border-border/50">
         <CardHeader>
