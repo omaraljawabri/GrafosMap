@@ -143,7 +143,6 @@ const DijkstraMapPage: NextPage = () => {
   const [modoGrafoAleatorio, setModoGrafoAleatorio] = useState(false);
   const [numVertices, setNumVertices] = useState('');
   const [mostrarIds, setMostrarIds] = useState(false);
-  const [arestasParaRemover, setArestasParaRemover] = useState<number[]>([]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -593,10 +592,8 @@ const gerarArestasPorTriangulacao = useCallback(() => {
     return;
   }
 
-  // Cria array de pontos no formato [x, y] com tuplas fixas
   const points: [number, number][] = scriptNodes.map(n => [n.x, n.y]);
 
-  // Cria a triangulação Delaunay
   const delaunay = Delaunay.from(points);
 
   // Pega os triângulos: array plano, cada grupo de 3 índices são vértices de um triângulo
@@ -818,15 +815,6 @@ useEffect(() => {
               </Button>
               <Button onClick={gerarArestasPorTriangulacao}>
                 Gerar Arestas por Triangulação
-              </Button>
-              <Button variant="destructive" onClick={() => {
-                toast({ title: "Modo Ativo", description: "Clique em dois vértices para remover a aresta." });
-                const canvas = canvasRef.current;
-                if (canvas) {
-                  canvas.addEventListener("click", handleClickRemocao);
-                }
-              }}>
-                Remover Aresta Manualmente
               </Button>
             </div>
           </CardContent>
