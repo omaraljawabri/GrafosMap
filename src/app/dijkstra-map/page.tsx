@@ -68,9 +68,9 @@ interface ScalingParams {
   maxX: number;
   minY: number;
   maxY: number;
-  scaleX: number;
-  scaleY: number;
-  padding: number;
+  scale: number;
+  offsetX: number;
+  offsetY: number;
   canvasWidth: number;
   canvasHeight: number;
 }
@@ -165,6 +165,7 @@ const DijkstraMapPage: NextPage = () => {
   const [modoRemoverArestas, setModoRemoverArestas] = useState(false);
   const [selectedVerticesToRemove, setSelectedVerticesToRemove] = useState<number[]>([]);
   const [showColoredVertices, setShowColoredVertices] = useState(true);
+  const [mostrarPesosArestas, setMostrarPesosArestas] = useState(false);
   
   const [graphType, setGraphType] = useState<GraphType>({
     isDirected: false,
@@ -172,10 +173,17 @@ const DijkstraMapPage: NextPage = () => {
     hasOneWayStreets: false
   });
 
+  const [editMode, setEditMode] = useState<'none' | 'add-vertex' | 'remove-vertex' | 'add-edge' | 'remove-edge'>('none');
+  const [firstNodeForEdge, setFirstNodeForEdge] = useState<number | null>(null);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const animationFrameIdRef = useRef<number | null>(null);
   const { toast } = useToast();
+
+  const [viewTransform, setViewTransform] = useState({ scale: 1, offsetX: 0, offsetY: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
 
   const distancia = useCallback((a: ScriptNode, b: ScriptNode): number => {
     return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
@@ -425,6 +433,92 @@ const handleFileUploadAndParse = useCallback(async () => {
   reader.readAsText(polyFile);
 }, [polyFile, toast, buildGraphInternal]);
 
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.style.cursor = 'grab';
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const zoomFactor = 1.1;
+      setViewTransform(prev => {
+        const newScale = e.deltaY > 0 ? prev.scale / zoomFactor : prev.scale * zoomFactor;
+        const mouseX = e.offsetX;
+        const mouseY = e.offsetY;
+        const newOffsetX = mouseX - (mouseX - prev.offsetX) * (newScale / prev.scale);
+        const newOffsetY = mouseY - (mouseY - prev.offsetY) * (newScale / prev.scale);
+        return { scale: newScale, offsetX: newOffsetX, offsetY: newOffsetY };
+      });
+    };
+
+    const handleDoubleClick = (e: MouseEvent) => {
+      e.preventDefault();
+      const zoomFactor = 1.8;
+      setViewTransform(prev => {
+        const newScale = prev.scale * zoomFactor;
+        const mouseX = e.offsetX;
+        const mouseY = e.offsetY;
+        const newOffsetX = mouseX - (mouseX - prev.offsetX) * (newScale / prev.scale);
+        const newOffsetY = mouseY - (mouseY - prev.offsetY) * (newScale / prev.scale);
+        return { scale: newScale, offsetX: newOffsetX, offsetY: newOffsetY };
+      });
+    };
+
+    const handleMouseDown = (e: MouseEvent) => {
+      canvas.style.cursor = 'grabbing';
+      setIsPanning(true);
+      setPanStart({ x: e.clientX, y: e.clientY });
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isPanning) return;
+      const dx = e.clientX - panStart.x;
+      const dy = e.clientY - panStart.y;
+      setViewTransform(prev => ({ ...prev, offsetX: prev.offsetX + dx, offsetY: prev.offsetY + dy }));
+      setPanStart({ x: e.clientX, y: e.clientY });
+    };
+
+    const handleMouseUp = () => {
+      canvas.style.cursor = 'grab';
+      setIsPanning(false);
+    };
+
+    const handleMouseLeave = () => {
+      canvas.style.cursor = 'default';
+      setIsPanning(false);
+    };
+
+    canvas.addEventListener('wheel', handleWheel);
+    canvas.addEventListener('dblclick', handleDoubleClick);
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mouseleave', handleMouseLeave);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      canvas.removeEventListener('wheel', handleWheel);
+      canvas.removeEventListener('dblclick', handleDoubleClick);
+      canvas.removeEventListener('mousedown', handleMouseDown);
+      canvas.removeEventListener('mouseleave', handleMouseLeave);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isPanning, panStart, setViewTransform, setIsPanning, setPanStart]);
+
+  const resetView = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const initialZoom = 1.5;
+    const canvasCenterX = canvas.width / 2;
+    const canvasCenterY = canvas.height / 2;
+    const initialOffsetX = canvasCenterX - canvasCenterX * initialZoom;
+    const initialOffsetY = canvasCenterY - canvasCenterY * initialZoom;
+    setViewTransform({
+      scale: initialZoom,
+      offsetX: initialOffsetX,
+      offsetY: initialOffsetY,
+    });
+  };
 
   const dijkstraInternal = useCallback((startNodeIndex: number, endNodeIndex: number, currentNodes: ScriptNode[], currentAdj: AdjacencyList): DijkstraResult => {
   if (currentNodes.length === 0 || currentAdj.length === 0 || startNodeIndex >= currentNodes.length || endNodeIndex >= currentNodes.length) {
@@ -517,7 +611,9 @@ const handleFileUploadAndParse = useCallback(async () => {
       if (canvas) canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
       return;
     }
-    const padding = 20; const canvasWidth = canvas.width; const canvasHeight = canvas.height;
+    const padding = 5; 
+    const canvasWidth = canvas.width; 
+    const canvasHeight = canvas.height;
     
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     if (scriptNodes.length > 0) {
@@ -531,10 +627,17 @@ const handleFileUploadAndParse = useCallback(async () => {
     const scaleX = (dX === 0) ? 1 : (canvasWidth - 2 * padding) / dX;
     const scaleY = (dY === 0) ? 1 : (canvasHeight - 2 * padding) / dY;
     
+    const scale = Math.min(scaleX, scaleY);
+    const newWidth = dX * scale;
+    const newHeight = dY * scale;
+    const offsetX = (canvasWidth - newWidth) / 2;
+    const offsetY = (canvasHeight - newHeight) / 2;
+    
     setScalingParams({ 
-        minX, maxX, minY, maxY, scaleX, scaleY, 
-        padding, canvasWidth, canvasHeight 
+        minX, maxX, minY, maxY, scale, offsetX, offsetY,
+        canvasWidth, canvasHeight 
     });
+    resetView();
   }, [scriptNodes, osmFile]);
   
   const scaleCanvasPoint = useCallback((node: ScriptNode): { x: number, y: number } => {
@@ -543,8 +646,8 @@ const handleFileUploadAndParse = useCallback(async () => {
         return { x: scalingParams.canvasWidth / 2, y: scalingParams.canvasHeight / 2 };
     }
     return {
-      x: scalingParams.padding + (node.x - scalingParams.minX) * scalingParams.scaleX,
-      y: scalingParams.padding + (node.y - scalingParams.minY) * scalingParams.scaleY
+      x: scalingParams.offsetX + (node.x - scalingParams.minX) * scalingParams.scale,
+      y: scalingParams.offsetY + (node.y - scalingParams.minY) * scalingParams.scale
     };
   }, [scalingParams]);
 
@@ -556,9 +659,11 @@ const handleFileUploadAndParse = useCallback(async () => {
     }
     const ctx = canvas.getContext('2d'); if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = 'gray';
-    ctx.lineWidth = 1;
-    ctx.lineWidth = 1;
+    
+    ctx.save();
+    ctx.translate(viewTransform.offsetX, viewTransform.offsetY);
+    ctx.scale(viewTransform.scale, viewTransform.scale);
+
     ways.forEach(way => {
       for (let i = 0; i < way.nodes.length - 1; i++) {
         const fromIdx = way.nodes[i];
@@ -582,9 +687,19 @@ const handleFileUploadAndParse = useCallback(async () => {
         }
 
         ctx.stroke();
+
+        if (mostrarPesosArestas) {
+          const weight = distancia(from, to);
+          const midX = (u.x + v.x) / 2;
+          const midY = (u.y + v.y) / 2;
+          ctx.fillStyle = document.documentElement.classList.contains('dark') ? '#ffffff' : '#000000';
+          ctx.font = '8px Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(weight.toFixed(1), midX, midY);
+        }
       }
     });
-
 
     if (pathResult?.path.length) {
       ctx.strokeStyle = 'red'; 
@@ -627,13 +742,28 @@ const handleFileUploadAndParse = useCallback(async () => {
         const appNode = appNodes[nodeIndex];
         if (appNode) {
             ctx.fillStyle = document.documentElement.classList.contains('dark') ? 'blue' : 'blue';
-            ctx.font = "10px Arial";
+            ctx.font = "8px Arial";
             ctx.textAlign = "center"; ctx.fillText(`ID: ${appNode.id}`, p.x, p.y - 10);
         }
       }
     });
 
-  }, [scriptNodes, ways, pathResult, selectedNodeIndices, scalingParams, scaleCanvasPoint, dashOffset, appNodes, showColoredVertices]);
+    // Desenhar IDs de todos os vértices se ativado
+    if (mostrarIds) {
+      scriptNodes.forEach((node, index) => {
+        const p = scaleCanvasPoint(node);
+        const appNode = appNodes[index];
+        if (appNode) {
+          ctx.fillStyle = 'blue';
+          ctx.font = "8px Arial";
+          ctx.textAlign = "center";
+          ctx.fillText(appNode.id, p.x, p.y - 10);
+        }
+      });
+    }
+
+    ctx.restore();
+  }, [scriptNodes, ways, pathResult, selectedNodeIndices, scalingParams, scaleCanvasPoint, dashOffset, appNodes, showColoredVertices, mostrarPesosArestas, mostrarIds, viewTransform]);
 
   useEffect(() => {
     if (pathResult?.path.length) {
@@ -650,39 +780,148 @@ const handleFileUploadAndParse = useCallback(async () => {
   }, [pathResult]);
 
   const getClosestNodeIndex = useCallback((canvasX: number, canvasY: number): number | null => {
-    if (!scalingParams || scriptNodes.length === 0 || !canvasRef.current) return null;
-    
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = rect.width / canvas.width;
-    const scaleY = rect.height / canvas.height;
-    
-    const internalX = canvasX / scaleX;
-    const internalY = canvasY / scaleY;
-    
-    const graphX = (internalX - scalingParams.padding) / scalingParams.scaleX + scalingParams.minX;
-    const graphY = (internalY - scalingParams.padding) / scalingParams.scaleY + scalingParams.minY;
+    if (!scalingParams || !canvasRef.current || scriptNodes.length === 0) return null;
 
     let closestIndex = -1; 
     let minSqDist = Infinity;
     
     for (let i = 0; i < scriptNodes.length; i++) {
-      const dx = graphX - scriptNodes[i].x; 
-      const dy = graphY - scriptNodes[i].y;
+        const node = scriptNodes[i];
+        const scaledPoint = scaleCanvasPoint(node);
+        const screenX = scaledPoint.x * viewTransform.scale + viewTransform.offsetX;
+        const screenY = scaledPoint.y * viewTransform.scale + viewTransform.offsetY;
+        const dx = canvasX - screenX;
+        const dy = canvasY - screenY;
       const sqDist = dx * dx + dy * dy;
+
       if (sqDist < minSqDist) { 
         minSqDist = sqDist; 
         closestIndex = i;
       }
     }
     
-    const scaleFactor = Math.min(scaleX, scaleY);
-    const threshold = Math.max(15 / scaleFactor, 8);
-    const distanceInPixels = Math.sqrt(minSqDist) * Math.min(Math.abs(scalingParams.scaleX), Math.abs(scalingParams.scaleY)) * scaleFactor;
-    
-    return (closestIndex !== -1 && distanceInPixels < threshold * 1.5) ? closestIndex : null;
+    const threshold = 15;
+    if (closestIndex !== -1 && Math.sqrt(minSqDist) < threshold) {
+        return closestIndex;
+    }
+    return null;
+  }, [scriptNodes, scalingParams, viewTransform, scaleCanvasPoint]);
 
-  }, [scriptNodes, scalingParams]);
+  // Função otimizada para lidar com cliques de edição
+  const handleEditClick = useCallback((event: MouseEvent) => {
+    if (editMode === 'none') return;
+    
+    const canvas = event.target as HTMLCanvasElement;
+    const rect = canvas.getBoundingClientRect();
+    const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (event.clientY - rect.top) * (canvas.height / rect.height);
+    const closestNodeIdx = getClosestNodeIndex(x, y);
+
+    const editActions = {
+      'add-vertex': () => {
+        if (!scalingParams) return;
+        const transformedX = (x - viewTransform.offsetX) / viewTransform.scale;
+        const transformedY = (y - viewTransform.offsetY) / viewTransform.scale;
+        const graphX = (transformedX - scalingParams.offsetX) / scalingParams.scale + scalingParams.minX;
+        const graphY = (transformedY - scalingParams.offsetY) / scalingParams.scale + scalingParams.minY;
+        const maxId = appNodes.length > 0 ? Math.max(...appNodes.map(n => parseInt(n.id))) : -1;
+        const newId = (maxId + 1).toString();
+        const newAppNode: AppNode = { id: newId, x: graphX, y: graphY, originalLat: graphY, originalLon: graphX };
+        const newScriptNode: ScriptNode = { id: newId, x: graphX, y: graphY };
+        setAppNodes([...appNodes, newAppNode]);
+        setScriptNodes([...scriptNodes, newScriptNode]);
+        setAdj([...adj, []]);
+        toast({ title: "Vértice Adicionado", description: `Vértice com ID ${newId} foi adicionado.` });
+      },
+      'remove-vertex': () => {
+        if (closestNodeIdx === null) {
+          toast({ title: "Nenhum vértice selecionado", description: "Clique mais perto de um vértice para removê-lo.", variant: "destructive" });
+          return;
+        }
+        const removedNodeId = appNodes[closestNodeIdx].id;
+        const newAppNodes = appNodes.filter((_, index) => index !== closestNodeIdx);
+        const newScriptNodes = scriptNodes.filter((_, index) => index !== closestNodeIdx);
+        const newWays = ways.map(way => ({ ...way, nodes: way.nodes.filter(nodeIdx => nodeIdx !== closestNodeIdx) })).filter(way => way.nodes.length > 1);
+        const remappedWays = newWays.map(way => ({ ...way, nodes: way.nodes.map(nodeIdx => nodeIdx > closestNodeIdx ? nodeIdx - 1 : nodeIdx) }));
+        setAppNodes(newAppNodes);
+        setScriptNodes(newScriptNodes);
+        setWays(remappedWays);
+        buildGraphInternal(newScriptNodes, remappedWays);
+        toast({ title: "Vértice Removido", description: `Vértice ID ${removedNodeId} e suas arestas foram removidos.` });
+      },
+      'add-edge': () => {
+        if (closestNodeIdx === null) {
+          toast({ title: "Nenhum vértice selecionado", description: "Clique em um vértice para iniciar a aresta.", variant: "destructive" });
+          return;
+        }
+        if (firstNodeForEdge === null) {
+          setFirstNodeForEdge(closestNodeIdx);
+          toast({ title: "Vértice de Origem Selecionado", description: `ID: ${appNodes[closestNodeIdx].id}. Clique em outro vértice para criar a aresta.` });
+        } else {
+          if (firstNodeForEdge === closestNodeIdx) {
+            toast({ title: "Aresta inválida", description: "Não é possível criar uma aresta para o mesmo vértice.", variant: "destructive" });
+            setFirstNodeForEdge(null);
+            return;
+          }
+          const edgeExists = ways.some(way => (way.nodes.includes(firstNodeForEdge) && way.nodes.includes(closestNodeIdx)));
+          if (edgeExists) {
+            toast({ title: "Aresta já existe", variant: "destructive" });
+            setFirstNodeForEdge(null);
+            return;
+          }
+          const newWay: Way = { nodes: [firstNodeForEdge, closestNodeIdx], oneway: false };
+          const newWays = [...ways, newWay];
+          setWays(newWays);
+          buildGraphInternal(scriptNodes, newWays);
+          toast({ title: "Aresta Adicionada", description: `Aresta criada entre os vértices ${appNodes[firstNodeForEdge].id} e ${appNodes[closestNodeIdx].id}.` });
+          setFirstNodeForEdge(null);
+        }
+      },
+      'remove-edge': () => {
+        if (closestNodeIdx === null) {
+          toast({ title: "Nenhum vértice selecionado", description: "Clique no primeiro vértice da aresta.", variant: "destructive" });
+          return;
+        }
+        if (firstNodeForEdge === null) {
+          setFirstNodeForEdge(closestNodeIdx);
+          toast({ title: "Vértice de Origem Selecionado", description: `ID: ${appNodes[closestNodeIdx].id}. Clique no segundo vértice para remover a aresta.` });
+        } else {
+          if (firstNodeForEdge === closestNodeIdx) {
+            toast({ title: "Ação cancelada", variant: "destructive" });
+            setFirstNodeForEdge(null);
+            return;
+          }
+          const edgeIndex = ways.findIndex(way => (way.nodes.includes(firstNodeForEdge) && way.nodes.includes(closestNodeIdx)));
+          if (edgeIndex === -1) {
+            toast({ title: "Aresta não encontrada", variant: "destructive" });
+          } else {
+            const newWays = ways.filter((_, index) => index !== edgeIndex);
+            setWays(newWays);
+            buildGraphInternal(scriptNodes, newWays);
+            toast({ title: "Aresta Removida" });
+          }
+          setFirstNodeForEdge(null);
+        }
+      }
+    };
+
+    editActions[editMode]?.();
+  }, [editMode, scriptNodes, scalingParams, appNodes, ways, getClosestNodeIndex, firstNodeForEdge, buildGraphInternal, toast, setFirstNodeForEdge, setAppNodes, setScriptNodes, setWays, setAdj, viewTransform]);
+
+  // Configuração do cursor e eventos de edição
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const originalCursor = canvas.style.cursor;
+    canvas.style.cursor = editMode === 'none' ? 'grab' : 'crosshair';
+
+    canvas.addEventListener('click', handleEditClick);
+    return () => {
+      canvas.removeEventListener('click', handleEditClick);
+      canvas.style.cursor = originalCursor;
+    };
+  }, [handleEditClick, editMode]);
 
   useEffect(() => {
     if (modoRemoverArestas) return;
@@ -690,8 +929,11 @@ const handleFileUploadAndParse = useCallback(async () => {
     if (!canvas || scriptNodes.length === 0 || !scalingParams || isLoading) return;
 
     const handleClick = (event: MouseEvent) => {
+      if (!canvasRef.current) return;
+      const canvas = canvasRef.current;
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left; const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (event.clientY - rect.top) * (canvas.height / rect.height);
       const closestNodeIdx = getClosestNodeIndex(x, y);
 
       if (closestNodeIdx === null) return;
@@ -839,6 +1081,9 @@ const gerarArestasPorTriangulacao = useCallback(() => {
   setWays(newWays);
   buildGraphInternal(scriptNodes, newWays);
 
+  // Atualiza as estatísticas do mapa
+  setMapStats(`Grafo aleatório: ${scriptNodes.length} vértices, ${newWays.length} arestas.`);
+
   toast({ title: "Arestas Criadas", description: `Triangulação gerou ${newWays.length} arestas.` });
 
 }, [scriptNodes, buildGraphInternal, toast]);
@@ -924,6 +1169,17 @@ useEffect(() => {
       ctx.moveTo(u.x, u.y);
       ctx.lineTo(v.x, v.y);
       ctx.stroke();
+
+      if (mostrarPesosArestas) {
+        const weight = distancia(scriptNodes[way.nodes[i]], scriptNodes[way.nodes[i + 1]]);
+        const midX = (u.x + v.x) / 2;
+        const midY = (u.y + v.y) / 2;
+        ctx.fillStyle = document.documentElement.classList.contains('dark') ? '#ffffff' : '#000000';
+        ctx.font = '8px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(weight.toFixed(1), midX, midY);
+      }
     }
   });
 
@@ -937,12 +1193,12 @@ useEffect(() => {
 
     if (mostrarIds) {
       ctx.fillStyle = "blue";
-      ctx.font = "10px Arial";
+      ctx.font = "8px Arial";
       ctx.textAlign = "center";
       ctx.fillText(appNodes[index]?.id ?? "", x, y - 10);
     }
   });
-}, [modoGrafoAleatorio, scriptNodes, scalingParams, ways, mostrarIds, appNodes, scaleCanvasPoint]);
+}, [modoGrafoAleatorio, scriptNodes, scalingParams, ways, mostrarIds, appNodes, scaleCanvasPoint, mostrarPesosArestas]);
 
 useEffect(() => {
   if (modoRemoverArestas) {
@@ -989,7 +1245,7 @@ useEffect(() => {
       );
 
       if (edgeIndex === -1) {
-        toast({ title: "Aresta não encontrada", description: `Não existe aresta entre os vértices selecionados.` });
+        toast({ title: "Aresta não encontrada", variant: "destructive" });
       } else {
         // Remove a aresta do array ways
         const newWays = [...ways];
@@ -1089,9 +1345,6 @@ useEffect(() => {
 
             {/* Linha 2: Botões Enumerar e Triangulação */}
             <div className="flex gap-4 items-center justify-center">
-              <Button variant="outline" onClick={() => setMostrarIds(prev => !prev)}>
-                {mostrarIds ? "Ocultar IDs" : "Enumerar Vértices"}
-              </Button>
               <Button onClick={gerarArestasPorTriangulacao}>
                 Gerar Arestas por Triangulação
               </Button>
@@ -1131,6 +1384,12 @@ useEffect(() => {
             </div>
             {appNodes.length > 0 && (
   <div className="flex items-center gap-4 ml-auto">
+    <Button variant="outline" size="sm" onClick={() => setMostrarIds(prev => !prev)}>
+      {mostrarIds ? "Ocultar IDs" : "Enumerar Vértices"}
+    </Button>
+    <Button variant="outline" size="sm" onClick={() => setMostrarPesosArestas(prev => !prev)}>
+      {mostrarPesosArestas ? "Ocultar Pesos" : "Enumerar Arestas"}
+    </Button>
     <Button 
       variant="outline" 
       size="sm" 
@@ -1140,6 +1399,9 @@ useEffect(() => {
     </Button>
     <Button onClick={handleCopyImage} variant="outline" size="sm">
       <CopyIcon className="mr-2 h-4 w-4" /> Copiar Imagem
+    </Button>
+    <Button variant="outline" size="sm" onClick={resetView}>
+      Resetar Visualização
     </Button>
   </div>
 )}
@@ -1206,6 +1468,20 @@ useEffect(() => {
                   <div className="w-3 h-3 rounded-full bg-blue-500"></div>
                   <span>Nó de destino</span>
                 </div>
+                {mostrarPesosArestas && (
+                  <div className="flex items-center space-x-2">
+                    <div className="w-8 h-4 text-center text-xs text-foreground flex items-center justify-center">
+                      <span>123.4</span>
+                    </div>
+                    <span>Peso da aresta</span>
+                  </div>
+                )}
+                {mostrarIds && (
+                  <div className="flex items-center space-x-2">
+                    <span className="text-blue-500 font-bold text-xs">ID</span>
+                    <span>ID do Vértice</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1213,16 +1489,51 @@ useEffect(() => {
       </Card>
 
       {pathResultText && (
-        <Card className="w-full max-w-7xl mt-8 bg-card/80 backdrop-blur-md shadow-xl border-border/50">
+        <Card className="w-full max-w-7xl mt-8 mb-12 bg-card/80 backdrop-blur-md shadow-xl border-border/50">
           <CardHeader>
             <CardTitle className="text-xl font-headline text-primary flex items-center">
               <FileTextIcon className="mr-2 h-6 w-6" /> Resultado do Caminho
             </CardTitle>
           </CardHeader>
           <CardContent className="p-6">
-            <pre className="text-sm text-foreground whitespace-pre-wrap bg-background/50 p- rounded-md">
+            <pre className="text-sm text-foreground whitespace-pre-wrap bg-background/50 p-4 rounded-md">
               {pathResultText}
             </pre>
+          </CardContent>
+        </Card>
+      )}
+
+      {appNodes.length > 0 && (
+        <Card className="w-full max-w-7xl mb-8 bg-card/80 backdrop-blur-md shadow-xl border-border/50">
+          <CardHeader>
+            <CardTitle>Ferramentas de Edição</CardTitle>
+            <CardDescription>
+              Selecione um modo para modificar o grafo diretamente no mapa. Clique no mesmo botão novamente para voltar ao modo de navegação.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {([
+                { value: 'add-vertex' as const, label: 'Adicionar Vértice' },
+                { value: 'remove-vertex' as const, label: 'Remover Vértice' },
+                { value: 'add-edge' as const, label: 'Adicionar Aresta' },
+                { value: 'remove-edge' as const, label: 'Remover Aresta' }
+              ] as const).map(({ value, label }) => (
+                <Button
+                  key={value}
+                  variant={editMode === value ? "default" : "outline"}
+                  className="flex flex-col items-center justify-center p-4 h-auto"
+                  onClick={() => {
+                    const newMode = editMode === value ? 'none' : value;
+                    setEditMode(newMode);
+                    setFirstNodeForEdge(null);
+                  }}
+                  disabled={editMode !== 'none' && editMode !== value}
+                >
+                  <span className="text-sm">{label}</span>
+                </Button>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}
