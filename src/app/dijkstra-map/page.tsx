@@ -578,7 +578,7 @@ const handleFileUploadAndParse = useCallback(async () => {
           'Caminho bloqueado por vias com mão única' : 
           'Não existe caminho entre os nós selecionados',
         details: hasOneWayIssue ?
-          'O caminho não pode ser encontrado devido a direção nas vias. Tente selecionar nós diferentes.' :
+          'O caminho não pode ser encontrado devido à direção nas vias. Tente selecionar nós diferentes.' :
           'Os nós selecionados não estão conectados no grafo.'
       }
     };
@@ -693,7 +693,7 @@ const handleFileUploadAndParse = useCallback(async () => {
           const midX = (u.x + v.x) / 2;
           const midY = (u.y + v.y) / 2;
           ctx.fillStyle = document.documentElement.classList.contains('dark') ? '#ffffff' : '#000000';
-          ctx.font = '8px Arial';
+          ctx.font = '2px Arial';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(weight.toFixed(1), midX, midY);
@@ -755,7 +755,7 @@ const handleFileUploadAndParse = useCallback(async () => {
         const appNode = appNodes[index];
         if (appNode) {
           ctx.fillStyle = 'blue';
-          ctx.font = "8px Arial";
+          ctx.font = "2px Arial";
           ctx.textAlign = "center";
           ctx.fillText(appNode.id, p.x, p.y - 10);
         }
@@ -1504,14 +1504,16 @@ useEffect(() => {
       )}
 
       {appNodes.length > 0 && (
-        <Card className="w-full max-w-7xl mb-8 bg-card/80 backdrop-blur-md shadow-xl border-border/50">
-          <CardHeader>
-            <CardTitle>Ferramentas de Edição</CardTitle>
-            <CardDescription>
-              Selecione um modo para modificar o grafo diretamente no mapa. Clique no mesmo botão novamente para voltar ao modo de navegação.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+  <Card className="w-full max-w-7xl mb-8 bg-card/80 backdrop-blur-md shadow-xl border-border/50">
+    <CardHeader>
+      <CardTitle className="text-xl font-headline text-primary flex items-center">
+        Ferramentas de Edição
+      </CardTitle>
+      <CardDescription>
+        Selecione um modo para modificar o grafo diretamente no mapa. Clique no mesmo botão novamente para voltar ao modo de navegação.
+      </CardDescription>
+    </CardHeader>
+    <CardContent>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {([
                 { value: 'add-vertex' as const, label: 'Adicionar Vértice' },
