@@ -175,7 +175,7 @@ Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para ma
 - Email: omar.jawabri@discente.ufg.br
 
 **Hugo Borges**
-- GitHub: [@HugoPBorges](https://github.com/HugoPBorges
+- GitHub: [@HugoPBorges](https://github.com/HugoPBorges)
 - Email: hugoborges@discente.ufg.br
 
 **Rodrigo Luiz**
