@@ -22,7 +22,6 @@ Uma aplicação web para visualização e análise de grafos, implementando o al
 ![JavaScript](https://img.shields.io/badge/javascript-%23323330.svg?style=for-the-badge&logo=javascript&logoColor=%23F7DF1E)
 ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC.svg?style=for-the-badge&logo=typescript&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-%23323330.svg?style=for-the-badge&logo=node.js&logoColor=%23339933)
-![Expo](https://img.shields.io/badge/Expo-%23000000.svg?style=for-the-badge&logo=expo&logoColor=%F72B2B)
 ![npm](https://img.shields.io/badge/npm-%23000000.svg?style=for-the-badge&logo=npm&logoColor=%CB3837)
 ![tailwind](https://img.shields.io/badge/Tailwind_CSS-grey?style=for-the-badge&logo=tailwind-css&logoColor=38B2AC)
 
