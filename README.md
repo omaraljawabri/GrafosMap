@@ -167,19 +167,19 @@ Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para ma
 - Email:  pedroaugusto23@discente.ufg.br
 
 **Stephano Viglio**
-- - GitHub: [@StephanoViglio](https://github.com/StephanoViglio)
+- GitHub: [@StephanoViglio](https://github.com/StephanoViglio)
 - Email: stephanoviglio@discente.ufg.br
 
 **Omar Al Jawabri**
-- - GitHub: [@omaraljawabri](https://github.com/omaraljawabri)
+- GitHub: [@omaraljawabri](https://github.com/omaraljawabri)
 - Email: omar.jawabri@discente.ufg.br
 
 **Hugo Borges**
-- - GitHub: [@HugoPBorges](https://github.com/HugoPBorges
+- GitHub: [@HugoPBorges](https://github.com/HugoPBorges
 - Email: hugoborges@discente.ufg.br
 
 **Rodrigo Luiz**
-- - GitHub: [@rodrigoluizf](https://github.com/rodrigoluizf)
+- GitHub: [@rodrigoluizf](https://github.com/rodrigoluizf)
 - Email: rodrigoluiz@discente.ufg.br
 
 ## 🙏 Agradecimentos
