@@ -739,7 +739,7 @@ const handleFileUploadAndParse = useCallback(async () => {
         const appNode = appNodes[nodeIndex];
         if (appNode) {
             ctx.fillStyle = document.documentElement.classList.contains('dark') ? 'blue' : 'blue';
-            ctx.font = "10px Arial";
+            ctx.font = "8px Arial";
             ctx.textAlign = "center"; ctx.fillText(`ID: ${appNode.id}`, p.x, p.y - 10);
         }
       }
@@ -752,7 +752,7 @@ const handleFileUploadAndParse = useCallback(async () => {
         const appNode = appNodes[index];
         if (appNode) {
           ctx.fillStyle = 'blue';
-          ctx.font = "10px Arial";
+          ctx.font = "8px Arial";
           ctx.textAlign = "center";
           ctx.fillText(appNode.id, p.x, p.y - 10);
         }
@@ -1071,7 +1071,7 @@ useEffect(() => {
 
     if (mostrarIds) {
       ctx.fillStyle = "blue";
-      ctx.font = "10px Arial";
+      ctx.font = "8px Arial";
       ctx.textAlign = "center";
       ctx.fillText(appNodes[index]?.id ?? "", x, y - 10);
     }
@@ -1352,6 +1352,12 @@ useEffect(() => {
                       <span>123.4</span>
                     </div>
                     <span>Peso da aresta</span>
+                  </div>
+                )}
+                {mostrarIds && (
+                  <div className="flex items-center space-x-2">
+                    <span className="text-blue-500 font-bold text-xs">ID</span>
+                    <span>ID do Vértice</span>
                   </div>
                 )}
               </div>
