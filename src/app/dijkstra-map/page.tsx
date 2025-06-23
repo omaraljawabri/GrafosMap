@@ -173,6 +173,9 @@ const DijkstraMapPage: NextPage = () => {
     hasOneWayStreets: false
   });
 
+  const [editMode, setEditMode] = useState<'none' | 'add-vertex' | 'remove-vertex' | 'add-edge' | 'remove-edge'>('none');
+  const [firstNodeForEdge, setFirstNodeForEdge] = useState<number | null>(null);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const animationFrameIdRef = useRef<number | null>(null);
@@ -779,9 +782,9 @@ const handleFileUploadAndParse = useCallback(async () => {
   const getClosestNodeIndex = useCallback((canvasX: number, canvasY: number): number | null => {
     if (!scalingParams || !canvasRef.current || scriptNodes.length === 0) return null;
 
-    let closestIndex = -1;
+    let closestIndex = -1; 
     let minSqDist = Infinity;
-
+    
     for (let i = 0; i < scriptNodes.length; i++) {
         const node = scriptNodes[i];
         const scaledPoint = scaleCanvasPoint(node);
@@ -789,20 +792,136 @@ const handleFileUploadAndParse = useCallback(async () => {
         const screenY = scaledPoint.y * viewTransform.scale + viewTransform.offsetY;
         const dx = canvasX - screenX;
         const dy = canvasY - screenY;
-        const sqDist = dx * dx + dy * dy;
+      const sqDist = dx * dx + dy * dy;
 
-        if (sqDist < minSqDist) {
-            minSqDist = sqDist;
-            closestIndex = i;
-        }
+      if (sqDist < minSqDist) { 
+        minSqDist = sqDist; 
+        closestIndex = i;
+      }
     }
-
+    
     const threshold = 15;
     if (closestIndex !== -1 && Math.sqrt(minSqDist) < threshold) {
         return closestIndex;
     }
     return null;
   }, [scriptNodes, scalingParams, viewTransform, scaleCanvasPoint]);
+
+  // Função otimizada para lidar com cliques de edição
+  const handleEditClick = useCallback((event: MouseEvent) => {
+    if (editMode === 'none') return;
+    
+    const canvas = event.target as HTMLCanvasElement;
+    const rect = canvas.getBoundingClientRect();
+    const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (event.clientY - rect.top) * (canvas.height / rect.height);
+    const closestNodeIdx = getClosestNodeIndex(x, y);
+
+    const editActions = {
+      'add-vertex': () => {
+        if (!scalingParams) return;
+        const transformedX = (x - viewTransform.offsetX) / viewTransform.scale;
+        const transformedY = (y - viewTransform.offsetY) / viewTransform.scale;
+        const graphX = (transformedX - scalingParams.offsetX) / scalingParams.scale + scalingParams.minX;
+        const graphY = (transformedY - scalingParams.offsetY) / scalingParams.scale + scalingParams.minY;
+        const maxId = appNodes.length > 0 ? Math.max(...appNodes.map(n => parseInt(n.id))) : -1;
+        const newId = (maxId + 1).toString();
+        const newAppNode: AppNode = { id: newId, x: graphX, y: graphY, originalLat: graphY, originalLon: graphX };
+        const newScriptNode: ScriptNode = { id: newId, x: graphX, y: graphY };
+        setAppNodes([...appNodes, newAppNode]);
+        setScriptNodes([...scriptNodes, newScriptNode]);
+        setAdj([...adj, []]);
+        toast({ title: "Vértice Adicionado", description: `Vértice com ID ${newId} foi adicionado.` });
+      },
+      'remove-vertex': () => {
+        if (closestNodeIdx === null) {
+          toast({ title: "Nenhum vértice selecionado", description: "Clique mais perto de um vértice para removê-lo.", variant: "destructive" });
+          return;
+        }
+        const removedNodeId = appNodes[closestNodeIdx].id;
+        const newAppNodes = appNodes.filter((_, index) => index !== closestNodeIdx);
+        const newScriptNodes = scriptNodes.filter((_, index) => index !== closestNodeIdx);
+        const newWays = ways.map(way => ({ ...way, nodes: way.nodes.filter(nodeIdx => nodeIdx !== closestNodeIdx) })).filter(way => way.nodes.length > 1);
+        const remappedWays = newWays.map(way => ({ ...way, nodes: way.nodes.map(nodeIdx => nodeIdx > closestNodeIdx ? nodeIdx - 1 : nodeIdx) }));
+        setAppNodes(newAppNodes);
+        setScriptNodes(newScriptNodes);
+        setWays(remappedWays);
+        buildGraphInternal(newScriptNodes, remappedWays);
+        toast({ title: "Vértice Removido", description: `Vértice ID ${removedNodeId} e suas arestas foram removidos.` });
+      },
+      'add-edge': () => {
+        if (closestNodeIdx === null) {
+          toast({ title: "Nenhum vértice selecionado", description: "Clique em um vértice para iniciar a aresta.", variant: "destructive" });
+          return;
+        }
+        if (firstNodeForEdge === null) {
+          setFirstNodeForEdge(closestNodeIdx);
+          toast({ title: "Vértice de Origem Selecionado", description: `ID: ${appNodes[closestNodeIdx].id}. Clique em outro vértice para criar a aresta.` });
+        } else {
+          if (firstNodeForEdge === closestNodeIdx) {
+            toast({ title: "Aresta inválida", description: "Não é possível criar uma aresta para o mesmo vértice.", variant: "destructive" });
+            setFirstNodeForEdge(null);
+            return;
+          }
+          const edgeExists = ways.some(way => (way.nodes.includes(firstNodeForEdge) && way.nodes.includes(closestNodeIdx)));
+          if (edgeExists) {
+            toast({ title: "Aresta já existe", variant: "destructive" });
+            setFirstNodeForEdge(null);
+            return;
+          }
+          const newWay: Way = { nodes: [firstNodeForEdge, closestNodeIdx], oneway: false };
+          const newWays = [...ways, newWay];
+          setWays(newWays);
+          buildGraphInternal(scriptNodes, newWays);
+          toast({ title: "Aresta Adicionada", description: `Aresta criada entre os vértices ${appNodes[firstNodeForEdge].id} e ${appNodes[closestNodeIdx].id}.` });
+          setFirstNodeForEdge(null);
+        }
+      },
+      'remove-edge': () => {
+        if (closestNodeIdx === null) {
+          toast({ title: "Nenhum vértice selecionado", description: "Clique no primeiro vértice da aresta.", variant: "destructive" });
+          return;
+        }
+        if (firstNodeForEdge === null) {
+          setFirstNodeForEdge(closestNodeIdx);
+          toast({ title: "Vértice de Origem Selecionado", description: `ID: ${appNodes[closestNodeIdx].id}. Clique no segundo vértice para remover a aresta.` });
+        } else {
+          if (firstNodeForEdge === closestNodeIdx) {
+            toast({ title: "Ação cancelada", variant: "destructive" });
+            setFirstNodeForEdge(null);
+            return;
+          }
+          const edgeIndex = ways.findIndex(way => (way.nodes.includes(firstNodeForEdge) && way.nodes.includes(closestNodeIdx)));
+          if (edgeIndex === -1) {
+            toast({ title: "Aresta não encontrada", variant: "destructive" });
+          } else {
+            const newWays = ways.filter((_, index) => index !== edgeIndex);
+            setWays(newWays);
+            buildGraphInternal(scriptNodes, newWays);
+            toast({ title: "Aresta Removida" });
+          }
+          setFirstNodeForEdge(null);
+        }
+      }
+    };
+
+    editActions[editMode]?.();
+  }, [editMode, scriptNodes, scalingParams, appNodes, ways, getClosestNodeIndex, firstNodeForEdge, buildGraphInternal, toast, setFirstNodeForEdge, setAppNodes, setScriptNodes, setWays, setAdj, viewTransform]);
+
+  // Configuração do cursor e eventos de edição
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const originalCursor = canvas.style.cursor;
+    canvas.style.cursor = editMode === 'none' ? 'grab' : 'crosshair';
+
+    canvas.addEventListener('click', handleEditClick);
+    return () => {
+      canvas.removeEventListener('click', handleEditClick);
+      canvas.style.cursor = originalCursor;
+    };
+  }, [handleEditClick, editMode]);
 
   useEffect(() => {
     if (modoRemoverArestas) return;
@@ -961,6 +1080,9 @@ const gerarArestasPorTriangulacao = useCallback(() => {
   // Atualiza o estado ways e rebuild do grafo
   setWays(newWays);
   buildGraphInternal(scriptNodes, newWays);
+
+  // Atualiza as estatísticas do mapa
+  setMapStats(`Grafo aleatório: ${scriptNodes.length} vértices, ${newWays.length} arestas.`);
 
   toast({ title: "Arestas Criadas", description: `Triangulação gerou ${newWays.length} arestas.` });
 
@@ -1123,7 +1245,7 @@ useEffect(() => {
       );
 
       if (edgeIndex === -1) {
-        toast({ title: "Aresta não encontrada", description: `Não existe aresta entre os vértices selecionados.` });
+        toast({ title: "Aresta não encontrada", variant: "destructive" });
       } else {
         // Remove a aresta do array ways
         const newWays = [...ways];
@@ -1367,16 +1489,51 @@ useEffect(() => {
       </Card>
 
       {pathResultText && (
-        <Card className="w-full max-w-7xl mt-8 bg-card/80 backdrop-blur-md shadow-xl border-border/50">
+        <Card className="w-full max-w-7xl mt-8 mb-12 bg-card/80 backdrop-blur-md shadow-xl border-border/50">
           <CardHeader>
             <CardTitle className="text-xl font-headline text-primary flex items-center">
               <FileTextIcon className="mr-2 h-6 w-6" /> Resultado do Caminho
             </CardTitle>
           </CardHeader>
           <CardContent className="p-6">
-            <pre className="text-sm text-foreground whitespace-pre-wrap bg-background/50 p- rounded-md">
+            <pre className="text-sm text-foreground whitespace-pre-wrap bg-background/50 p-4 rounded-md">
               {pathResultText}
             </pre>
+          </CardContent>
+        </Card>
+      )}
+
+      {appNodes.length > 0 && (
+        <Card className="w-full max-w-7xl mb-8 bg-card/80 backdrop-blur-md shadow-xl border-border/50">
+          <CardHeader>
+            <CardTitle>Ferramentas de Edição</CardTitle>
+            <CardDescription>
+              Selecione um modo para modificar o grafo diretamente no mapa. Clique no mesmo botão novamente para voltar ao modo de navegação.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {([
+                { value: 'add-vertex' as const, label: 'Adicionar Vértice' },
+                { value: 'remove-vertex' as const, label: 'Remover Vértice' },
+                { value: 'add-edge' as const, label: 'Adicionar Aresta' },
+                { value: 'remove-edge' as const, label: 'Remover Aresta' }
+              ] as const).map(({ value, label }) => (
+                <Button
+                  key={value}
+                  variant={editMode === value ? "default" : "outline"}
+                  className="flex flex-col items-center justify-center p-4 h-auto"
+                  onClick={() => {
+                    const newMode = editMode === value ? 'none' : value;
+                    setEditMode(newMode);
+                    setFirstNodeForEdge(null);
+                  }}
+                  disabled={editMode !== 'none' && editMode !== value}
+                >
+                  <span className="text-sm">{label}</span>
+                </Button>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}
